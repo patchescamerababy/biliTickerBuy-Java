@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BiliTickerBuy</title>
+    <style>
+        body { font-family: sans-serif; }
+        .tabs { display: flex; border-bottom: 1px solid #ccc; }
+        .tab-button { padding: 10px 15px; cursor: pointer; border: none; background-color: #f1f1f1; }
+        .tab-button.active { background-color: #ccc; }
+        .tab-content { display: none; padding: 20px; border: 1px solid #ccc; border-top: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+
+    <h1>BiliTickerBuy</h1>
+
+    <div class="tabs">
+        <button class="tab-button active" onclick="openTab(event, 'config')">生成配置</button>
+        <button class="tab-button" onclick="openTab(event, 'buy')">操作抢票</button>
+        <button class="tab-button" onclick="openTab(event, 'captcha')">过码测试</button>
+        <button class="tab-button" onclick="openTab(event, 'about')">项目说明</button>
+        <button class="tab-button" onclick="openTab(event, 'logs')">日志查看</button>
+    </div>
+
+    <div id="config" class="tab-content active">
+        <h2>生成配置</h2>
+        <div class="card">
+            <h3>登录信息</h3>
+            <p>当前用户: <span id="username">未登录</span></p>
+            <input type="file" id="cookie-file" accept=".json">
+            <button onclick="login()">登录</button>
+        </div>
+        <div class="card">
+            <h3>抢票信息</h3>
+            <input type="text" id="ticket-url" placeholder="输入票务URL">
+            <button onclick="getTicketInfo()">获取票信息</button>
+            <div id="ticket-details" style="display: none;">
+                <select id="ticket-select"></select>
+                <select id="buyer-select"></select>
+                <select id="address-select"></select>
+                <div id="people-checkboxes"></div>
+                <button onclick="generateConfig()">生成配置</button>
+            </div>
+        </div>
+        <div class="card">
+            <h3>配置结果</h3>
+            <pre id="config-output"></pre>
+        </div>
+    </div>
+
+    <div id="buy" class="tab-content">
+        <h2>操作抢票</h2>
+        <div class="card">
+            <h3>上传配置</h3>
+            <input type="file" id="config-files" accept=".json" multiple>
+        </div>
+        <div class="card">
+            <h3>抢票设置</h3>
+            <label for="start-time">开始时间:</label>
+            <input type="datetime-local" id="start-time" name="start-time">
+            <br>
+            <label for="interval">间隔 (ms):</label>
+            <input type="number" id="interval" value="300">
+            <br>
+            <label for="mode">模式:</label>
+            <select id="mode">
+                <option value="infinite">无限</option>
+                <option value="finite">有限</option>
+            </select>
+            <br>
+            <button onclick="startBuying()">开始抢票</button>
+        </div>
+    </div>
+
+    <div id="captcha" class="tab-content">
+        <h2>过码测试</h2>
+        <div class="card">
+            <h3>测试设置</h3>
+            <select id="captcha-method">
+                <!-- Options will be populated dynamically -->
+            </select>
+            <button onclick="testCaptcha()">开始测试</button>
+        </div>
+        <div class="card">
+            <h3>测试结果</h3>
+            <pre id="captcha-result"></pre>
+        </div>
+    </div>
+
+    <div id="about" class="tab-content">
+        <h2>项目说明</h2>
+        <p>此项目完全开源免费，切勿进行盈利。</p>
+    </div>
+
+    <div id="logs" class="tab-content">
+        <h2>日志查看</h2>
+        <button onclick="refreshLogs()">刷新日志</button>
+        <pre id="log-container"></pre>
+    </div>
+
+    <script>
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tab-button");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        function login() {
+            const fileInput = document.getElementById('cookie-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a cookie file.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('cookieFile', file);
+
+            fetch('/api/login', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log("Login response:", data);
+                if (data.status === 'success') {
+                    document.getElementById('username').textContent = data.username;
+                    alert('Login successful!');
+                } else {
+                    alert('Login failed: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to login.');
+            });
+        }
+
+        function getTicketInfo() {
+            const url = document.getElementById('ticket-url').value;
+            if (!url) {
+                alert('Please enter a ticket URL.');
+                return;
+            }
+
+            fetch('/api/ticket-info', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.errno !== 0) {
+                    alert('Error: ' + data.msg);
+                    return;
+                }
+                
+                const ticketDetails = document.getElementById('ticket-details');
+                const ticketSelect = document.getElementById('ticket-select');
+                const buyerSelect = document.getElementById('buyer-select');
+                const addressSelect = document.getElementById('address-select');
+                const peopleCheckboxes = document.getElementById('people-checkboxes');
+                
+                ticketSelect.innerHTML = ''; // Clear previous options
+                buyerSelect.innerHTML = '';
+                addressSelect.innerHTML = '';
+                peopleCheckboxes.innerHTML = '';
+
+                const projectData = data.data;
+                projectData.screen_list.forEach(screen => {
+                    screen.ticket_list.forEach(ticket => {
+                        const option = document.createElement('option');
+                        option.value = ticket.id;
+                        option.textContent = `${screen.name} - ${ticket.desc} - ¥${ticket.price / 100}`;
+                        ticketSelect.appendChild(option);
+                    });
+                });
+
+                // Fetch buyers
+                fetch('/api/buyers')
+                    .then(res => res.json())
+                    .then(buyerData => {
+                        if (buyerData.data && buyerData.data.list) {
+                            buyerData.data.list.forEach(buyer => {
+                                const option = document.createElement('option');
+                                option.value = buyer.id;
+                                option.textContent = `${buyer.name} - ${buyer.personal_id}`;
+                                buyerSelect.appendChild(option);
+
+                                const checkbox = document.createElement('input');
+                                checkbox.type = 'checkbox';
+                                checkbox.id = `person_${buyer.id}`;
+                                checkbox.value = buyer.id;
+                                const label = document.createElement('label');
+                                label.htmlFor = `person_${buyer.id}`;
+                                label.textContent = `${buyer.name} - ${buyer.personal_id}`;
+                                peopleCheckboxes.appendChild(checkbox);
+                                peopleCheckboxes.appendChild(label);
+                                peopleCheckboxes.appendChild(document.createElement('br'));
+                            });
+                        }
+                    });
+
+                // Fetch addresses
+                fetch('/api/addresses')
+                    .then(res => res.json())
+                    .then(addrData => {
+                        if (addrData.data && addrData.data.addr_list) {
+                            addrData.data.addr_list.forEach(addr => {
+                                const option = document.createElement('option');
+                                option.value = addr.id;
+                                option.textContent = `${addr.addr} - ${addr.name} - ${addr.phone}`;
+                                addressSelect.appendChild(option);
+                            });
+                        }
+                    });
+
+
+                ticketDetails.style.display = 'block';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to get ticket info.');
+            });
+        }
+
+        function generateConfig() {
+            const ticketId = document.getElementById('ticket-select').value;
+            const buyerId = document.getElementById('buyer-select').value;
+            const addressId = document.getElementById('address-select').value;
+            
+            const selectedPeople = [];
+            const checkboxes = document.querySelectorAll('#people-checkboxes input[type="checkbox"]:checked');
+            checkboxes.forEach(checkbox => {
+                selectedPeople.push(checkbox.value);
+            });
+
+            if (!ticketId || !buyerId || !addressId || selectedPeople.length === 0) {
+                alert('Please fill out all fields.');
+                return;
+            }
+
+            const configData = {
+                ticketId: ticketId,
+                buyerId: buyerId,
+                addressId: addressId,
+                people: selectedPeople
+            };
+
+            fetch('/api/generate-config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(configData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('config-output').textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to generate config.');
+            });
+        }
+
+        function startBuying() {
+            const files = document.getElementById('config-files').files;
+            if (files.length === 0) {
+                alert('Please upload at least one configuration file.');
+                return;
+            }
+
+            const startTime = document.getElementById('start-time').value;
+            const interval = document.getElementById('interval').value;
+            const mode = document.getElementById('mode').value;
+
+            const promises = [];
+            for (const file of files) {
+                promises.push(file.text());
+            }
+
+            Promise.all(promises).then(contents => {
+                const payload = {
+                    configs: contents,
+                    startTime: startTime,
+                    interval: interval,
+                    mode: mode
+                };
+
+                fetch('/api/start-buying', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to start buying process.');
+                });
+            });
+        }
+
+        function testCaptcha() {
+            const method = document.getElementById('captcha-method').value;
+            
+            fetch('/api/test-captcha', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ method: method })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('captcha-result').textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to test captcha.');
+            });
+        }
+
+        function refreshLogs() {
+            fetch('/api/logs')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('log-container').textContent = data;
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to refresh logs.');
+                });
+        }
+
+        // Auto-refresh logs every 5 seconds
+        setInterval(refreshLogs, 5000);
+
+        // Long-polling for login status changes
+        function checkLoginStatus() {
+            fetch('/api/check-login-status')
+                .then(response => {
+                    if (response.status === 200) {
+                        return response.json();
+                    } else if (response.status === 204) {
+                        // No update, restart polling
+                        setTimeout(checkLoginStatus, 1000);
+                        return null;
+                    } else {
+                        throw new Error('Error checking login status');
+                    }
+                })
+                .then(data => {
+                    if (data && data.status === 'updated') {
+                        // Login status updated, refresh username
+                        document.getElementById('username').textContent = data.username;
+                        console.log('Login status updated:', data.username);
+                        
+                        // Show notification
+                        alert('登录状态已更新，用户名: ' + data.username);
+                        
+                        // Reset forms if needed
+                        document.getElementById('ticket-details').style.display = 'none';
+                        document.getElementById('config-output').textContent = '';
+                    }
+                    
+                    // Restart polling
+                    setTimeout(checkLoginStatus, 1000);
+                })
+                .catch(error => {
+                    console.error('Error in login status polling:', error);
+                    // Restart polling after error
+                    setTimeout(checkLoginStatus, 5000);
+                });
+        }
+
+        // Start login status polling when page loads
+        window.addEventListener('load', function() {
+            checkLoginStatus();
+        });
+    </script>
+
+</body>
+</html>
