@@ -5,6 +5,8 @@
 # 说明
 #### 声明
 根据[https://github.com/patchescamerababy/biliTickerBuy-Java](https://github.com/mikumifa/biliTickerBuy)而实现，基本实现大部分功能，主要功能参考原项目，过码测试等未实现，日志暂时不保存
+
+~~存在很多意义不明的按钮，请忽略~~
 #### 兼容性
 支持Java8，需要JavaFX，如果启动失败，请使用Java8，理论上兼容WinXP\Win7，Linux/macOS理论上也支持。启动方法
 
