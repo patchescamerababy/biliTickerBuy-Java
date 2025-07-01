@@ -88,17 +88,24 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download all JAR artifacts
+        # No path => extracted into separate folders under workspace
         uses: actions/download-artifact@v4
-        with:
-          path: artifacts
 
-      - name: Compress JARs with 7zip
+      - name: Compress JARs with 7-Zip
         run: |
           mkdir -p release
-          find artifacts -type f -name '*.jar' -print0 | while IFS= read -r -d '' filepath; do
-            filename=$(basename "$filepath" .jar)
-            7z a "release/${filename}.7z" "$filepath"
+          # iterate through every extracted artifact directory
+          for dir in */ ; do
+            [ -d "$dir" ] || continue  # skip if none
+            # pick first jar inside that dir (there will be exactly one)
+            if ls "$dir"/*.jar 1>/dev/null 2>&1; then
+              artifact=$(basename "$dir")
+              jar_file=$(ls "$dir"/*.jar | head -n1)
+              7z a "release/${artifact}.7z" "$jar_file"
+            fi
           done
+          echo "Release assets:"
+          ls -l release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
