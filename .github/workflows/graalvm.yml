@@ -27,180 +27,161 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-latest   # ⇩ 5 个平台，均为非-static
             arch: amd64
             label: linux-amd64
-            static: false
           - os: ubuntu-latest
             arch: arm64
             label: linux-arm64
-            static: false
           - os: windows-latest
             arch: amd64
             label: windows-amd64
-            static: false
           - os: macos-latest
             arch: amd64
             label: macos-amd64
-            static: false
           - os: macos-latest
             arch: arm64
             label: macos-arm64
-            static: false
 
     steps:
-      # ── 1. 拉代码 ────────────────────────────────────────────────────────────
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # 1️⃣ Checkout
+    - uses: actions/checkout@v4
 
-      # ── 2. 安装 GraalVM (JDK 21) ─────────────────────────────────────────────
-      - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '21'
-          distribution: 'graalvm'
-          architecture: ${{ matrix.arch }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          native-image-job-reports: 'true'
+    # 2️⃣ GraalVM
+    - uses: graalvm/setup-graalvm@v1
+      with:
+        java-version: '21'
+        distribution: 'graalvm'
+        architecture: ${{ matrix.arch }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        native-image-job-reports: 'true'
 
-      # ── 3. Maven 构建，产生 shaded JAR ───────────────────────────────────────
-      - name: Build with Maven
-        run: mvn -B clean package
+    # 3️⃣ Maven build → shaded jar
+    - name: Build with Maven
+      run: mvn -B clean package
 
-      # ── 4. 复制 fat-jar → target/native-image/app.jar ───────────────────────
-      - name: Prepare Native Build Directory (all OSes)
-        shell: bash
-        run: |
-          set -e
-          mkdir -p target/native-image
-          # 找到 *-shaded.jar 作为 fat-jar；若没找到则退而求其次
-          FAT_JAR=$(find target -maxdepth 1 -name "*-shaded.jar" | head -n1)
-          if [[ -z "$FAT_JAR" ]]; then
-            FAT_JAR=$(find target -maxdepth 1 -name "*.jar" ! -name "original-*.jar" | head -n1)
-          fi
-          if [[ -z "$FAT_JAR" ]]; then
-            echo "::error::No fat-jar (shaded) found."; exit 1
-          fi
-          cp "$FAT_JAR" target/native-image/app.jar
-          echo "Using fat-jar: $FAT_JAR"
-          ls -lh target/native-image
+    # 4️⃣ copy fat-jar → app.jar
+    - name: Prepare Native Build Dir
+      shell: bash
+      run: |
+        mkdir -p target/native-image
+        FAT=$(find target -maxdepth 1 -name "*-shaded.jar" | head -n1)
+        if [[ -z "$FAT" ]]; then
+          echo "::error::shaded jar not found"; exit 1
+        fi
+        cp "$FAT" target/native-image/app.jar
+        ls -lh target/native-image
 
-      # ── 5. Windows native-image ─────────────────────────────────────────────
-      - name: Build Native Image (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          Copy-Item -Path config -Destination target/native-image -Recurse -Force
-          Push-Location target/native-image
-          native-image.cmd `
-            -H:+AllowDeprecatedBuilderClassesOnImageClasspath `
-            --initialize-at-run-time `
-            -H:+UnlockExperimentalVMOptions `
-            -H:-CheckToolchain `
-            --no-fallback `
-            --enable-https --enable-http `
-            -H:+JNI `
-            -H:ResourceConfigurationFiles=config/resource-config.json `
-            -H:ReflectionConfigurationFiles=config/reflect-config.json `
-            -H:JNIConfigurationFiles=config/jni-config.json `
-            -H:DynamicProxyConfigurationFiles=config/proxy-config.json `
-            -H:SerializationConfigurationFiles=config/serialization-config.json `
-            -H:+AddAllCharsets -H:+IncludeAllLocales `
-            -jar app.jar `
-            -H:Name=biliTickerBuy-${{ matrix.label }} `
-            ${{ matrix.static && '--static' || '' }}
-          Pop-Location
+    # 5️⃣ native-image  (Win)
+    - name: Build Native Image (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Copy-Item -Path config -Dst target/native-image -Recurse -Force
+        Push-Location target/native-image
+        native-image.cmd `
+          -H:+AllowDeprecatedBuilderClassesOnImageClasspath `
+          --initialize-at-run-time -H:+UnlockExperimentalVMOptions -H:-CheckToolchain `
+          --no-fallback --enable-https --enable-http -H:+JNI `
+          -H:ResourceConfigurationFiles=config/resource-config.json `
+          -H:ReflectionConfigurationFiles=config/reflect-config.json `
+          -H:JNIConfigurationFiles=config/jni-config.json `
+          -H:DynamicProxyConfigurationFiles=config/proxy-config.json `
+          -H:SerializationConfigurationFiles=config/serialization-config.json `
+          -H:+AddAllCharsets -H:+IncludeAllLocales `
+          -jar app.jar -H:Name=biliTickerBuy-${{ matrix.label }}
+        Pop-Location
 
-      # ── 6. Linux native-image ───────────────────────────────────────────────
-      - name: Build Native Image (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          cp -r config target/native-image/
-          pushd target/native-image
-          native-image \
-            -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
-            --initialize-at-run-time \
-            -H:+UnlockExperimentalVMOptions \
-            -H:-CheckToolchain \
-            --no-fallback \
-            --enable-https --enable-http \
-            -H:+JNI \
-            -H:ResourceConfigurationFiles=config/resource-config.json \
-            -H:ReflectionConfigurationFiles=config/reflect-config.json \
-            -H:JNIConfigurationFiles=config/jni-config.json \
-            -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
-            -H:SerializationConfigurationFiles=config/serialization-config.json \
-            -H:+AddAllCharsets -H:+IncludeAllLocales \
-            --gc=G1 \
-            -jar app.jar \
-            -H:Name=biliTickerBuy-${{ matrix.label }} \
-            ${{ matrix.static && '--static' || '' }}
-          popd
+    # 6️⃣ native-image  (Linux)
+    - name: Build Native Image (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      shell: bash
+      run: |
+        cp -r config target/native-image/
+        pushd target/native-image
+        native-image \
+          -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
+          --initialize-at-run-time -H:+UnlockExperimentalVMOptions -H:-CheckToolchain \
+          --no-fallback --enable-https --enable-http -H:+JNI \
+          -H:ResourceConfigurationFiles=config/resource-config.json \
+          -H:ReflectionConfigurationFiles=config/reflect-config.json \
+          -H:JNIConfigurationFiles=config/jni-config.json \
+          -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
+          -H:SerializationConfigurationFiles=config/serialization-config.json \
+          -H:+AddAllCharsets -H:+IncludeAllLocales --gc=G1 \
+          -jar app.jar -H:Name=biliTickerBuy-${{ matrix.label }}
+        popd
 
-      # ── 7. macOS native-image ───────────────────────────────────────────────
-      - name: Build Native Image (macOS)
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          cp -r config target/native-image/
-          pushd target/native-image
-          native-image \
-            -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
-            --initialize-at-run-time \
-            -H:+UnlockExperimentalVMOptions \
-            -H:-CheckToolchain \
-            --no-fallback \
-            --enable-https --enable-http \
-            -H:+JNI \
-            -H:ResourceConfigurationFiles=config/resource-config.json \
-            -H:ReflectionConfigurationFiles=config/reflect-config.json \
-            -H:JNIConfigurationFiles=config/jni-config.json \
-            -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
-            -H:SerializationConfigurationFiles=config/serialization-config.json \
-            -H:+AddAllCharsets -H:+IncludeAllLocales \
-            -jar app.jar \
-            -H:Name=biliTickerBuy-${{ matrix.label }} \
-            ${{ matrix.static && '--static' || '' }}
-          popd
+    # 7️⃣ native-image  (macOS)
+    - name: Build Native Image (macOS)
+      if: matrix.os == 'macos-latest'
+      shell: bash
+      run: |
+        cp -r config target/native-image/
+        pushd target/native-image
+        native-image \
+          -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
+          --initialize-at-run-time -H:+UnlockExperimentalVMOptions -H:-CheckToolchain \
+          --no-fallback --enable-https --enable-http -H:+JNI \
+          -H:ResourceConfigurationFiles=config/resource-config.json \
+          -H:ReflectionConfigurationFiles=config/reflect-config.json \
+          -H:JNIConfigurationFiles=config/jni-config.json \
+          -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
+          -H:SerializationConfigurationFiles=config/serialization-config.json \
+          -H:+AddAllCharsets -H:+IncludeAllLocales \
+          -jar app.jar -H:Name=biliTickerBuy-${{ matrix.label }}
+        popd
 
-      # ── 8. 仅在 ubuntu-amd64 上传 JAR ──────────────────────────────────────
-      - name: Upload JAR Artifacts
-        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: jar-files
-          path: |
-            target/*-shaded.jar
-            "!target/original-*.jar"
-          retention-days: 5
+    # 8️⃣ 整理输出：可执行 + 动态库 → dist/...
+    - name: Stage Binaries & Shared Libs
+      shell: bash
+      run: |
+        set -e
+        mkdir -p dist/${{ matrix.label }}
+        pushd target/native-image
+        BIN=biliTickerBuy-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        cp "$BIN" *.so *.dylib *.dll 2>/dev/null || true
+        popd
+        mv target/native-image/* dist/${{ matrix.label }}/ || true
+        ls -R dist/${{ matrix.label }}
 
-      # ── 9. 上传各平台二进制 ────────────────────────────────────────────────
-      - name: Upload Native Binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: biliTickerBuy-${{ matrix.label }}
-          path: target/native-image/biliTickerBuy-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-          retention-days: 5
+    # 9️⃣ 上传平台产物（含动态库）
+    - name: Upload Native Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: biliTickerBuy-${{ matrix.label }}
+        path: dist/${{ matrix.label }}
+        retention-days: 5
 
-  # ────────────────────── 发布阶段 ─────────────────────────────────────────────
+    # 10️⃣ ubuntu-amd64 另行上传 shaded JAR
+    - name: Upload JAR Artifacts
+      if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
+      uses: actions/upload-artifact@v4
+      with:
+        name: jar-files
+        path: |
+          target/*-shaded.jar
+          "!target/original-*.jar"
+        retention-days: 5
+
+# ─────────────────────────── 发布阶段 ──────────────────────────────
   release:
     needs: java-build
     runs-on: ubuntu-latest
     steps:
-      - name: Download Build Artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Zip individual build artifacts
+      - name: Zip each artifact dir
         run: |
           cd artifacts
           for dir in */ ; do
             zip -r "../${dir%/}.zip" "$dir"
           done
 
-      - name: Set up date
+      - name: Tag date
         run: echo "DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
 
       - name: Create GitHub Release
@@ -209,6 +190,4 @@ jobs:
           tag_name: v${{ env.DATE }}
           name: Release v${{ env.DATE }}
           files: '*.zip'
-          draft: false
-          prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
