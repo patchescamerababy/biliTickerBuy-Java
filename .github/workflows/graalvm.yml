@@ -25,20 +25,23 @@ jobs:
           - os: ubuntu-latest
             arch: amd64
             label: linux-amd64
+            static: false
           - os: ubuntu-latest
             arch: arm64
             label: linux-arm64
-          # ───────── Windows ───────
+            static: false
           - os: windows-latest
             arch: amd64
             label: windows-amd64
-          # ───────── macOS ─────────
+            static: true
           - os: macos-latest
             arch: amd64
             label: macos-amd64
+            static: false
           - os: macos-latest
             arch: arm64
             label: macos-arm64
+            static: false
 
     steps:
     # 1️⃣  克隆仓库 -----------------------------------------------------------
@@ -89,8 +92,8 @@ jobs:
           -H:ConfigurationFileDirectories=./config `
           -H:+AddAllCharsets -H:+IncludeAllLocales `
           -jar app.jar `
-          --static `
-          -H:Name=biliTickerBuy-${{ matrix.label }}
+          -H:Name=biliTickerBuy-${{ matrix.label }} `
+          ${{ matrix.static && '--static' || '' }}
         Pop-Location
 
     # 6️⃣  Linux native-image -------------------------------------------------
@@ -109,10 +112,10 @@ jobs:
           --enable-https --enable-http \
           -H:+JNI \
           -H:ConfigurationFileDirectories=./config \
-          --static \
           --gc=G1 \
           -jar app.jar \
-          -H:Name=biliTickerBuy-${{ matrix.label }}
+          -H:Name=biliTickerBuy-${{ matrix.label }} \
+          ${{ matrix.static && '--static' || '' }}
         popd
 
     # 7️⃣  macOS native-image -------------------------------------------------
@@ -131,9 +134,9 @@ jobs:
           --enable-https --enable-http \
           -H:+JNI \
           -H:ConfigurationFileDirectories=./config \
-          --static \
           -jar app.jar \
-          -H:Name=biliTickerBuy-${{ matrix.label }}
+          -H:Name=biliTickerBuy-${{ matrix.label }} \
+          ${{ matrix.static && '--static' || '' }}
         popd
 
     # 8️⃣  打包可执行文件 + 动态库 -------------------------------------------
