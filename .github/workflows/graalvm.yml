@@ -72,7 +72,6 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/native-image
-          ls ./target -alSh
           cp target/biliTickerBuy-1.0-SNAPSHOT.jar target/native-image/
 
       - name: Prepare Native Build Directory (Windows)
