@@ -49,11 +49,11 @@ jobs:
             static: false
 
     steps:
-      # 1️⃣  拉取代码
+      # ── 1. 拉代码 ────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣  安装 GraalVM (JDK 21)
+      # ── 2. 安装 GraalVM (JDK 21) ─────────────────────────────────────────────
       - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
@@ -63,25 +63,29 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           native-image-job-reports: 'true'
 
-      # 3️⃣  Maven 构建（生成可执行 JAR + fat-jar）
+      # ── 3. Maven 构建，产生 shaded JAR ───────────────────────────────────────
       - name: Build with Maven
         run: mvn -B clean package
 
-      # 4️⃣  预创建 Native Image 目录并复制 fat-jar → app.jar
-      #      a) 选出首个 *-jar-with-dependencies.jar
-      #      b) 统一命名为 app.jar，供后续三平台复用
+      # ── 4. 复制 fat-jar → target/native-image/app.jar ───────────────────────
       - name: Prepare Native Build Directory (all OSes)
         shell: bash
         run: |
+          set -e
           mkdir -p target/native-image
-          FAT_JAR=$(ls target/*-jar-with-dependencies.jar | head -n1)
+          # 找到 *-shaded.jar 作为 fat-jar；若没找到则退而求其次
+          FAT_JAR=$(find target -maxdepth 1 -name "*-shaded.jar" | head -n1)
           if [[ -z "$FAT_JAR" ]]; then
-            echo "::error::No fat-jar found."; exit 1
+            FAT_JAR=$(find target -maxdepth 1 -name "*.jar" ! -name "original-*.jar" | head -n1)
+          fi
+          if [[ -z "$FAT_JAR" ]]; then
+            echo "::error::No fat-jar (shaded) found."; exit 1
           fi
           cp "$FAT_JAR" target/native-image/app.jar
+          echo "Using fat-jar: $FAT_JAR"
           ls -lh target/native-image
 
-      # 5️⃣  Windows 原生镜像
+      # ── 5. Windows native-image ─────────────────────────────────────────────
       - name: Build Native Image (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -107,7 +111,7 @@ jobs:
             ${{ matrix.static && '--static' || '' }}
           Pop-Location
 
-      # 6️⃣  Linux 原生镜像
+      # ── 6. Linux native-image ───────────────────────────────────────────────
       - name: Build Native Image (Linux)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
@@ -134,7 +138,7 @@ jobs:
             ${{ matrix.static && '--static' || '' }}
           popd
 
-      # 7️⃣  macOS 原生镜像
+      # ── 7. macOS native-image ───────────────────────────────────────────────
       - name: Build Native Image (macOS)
         if: matrix.os == 'macos-latest'
         shell: bash
@@ -160,20 +164,18 @@ jobs:
             ${{ matrix.static && '--static' || '' }}
           popd
 
-      # 8️⃣  上传 JAR（只在 ubuntu-amd64 上执行一次）
+      # ── 8. 仅在 ubuntu-amd64 上传 JAR ──────────────────────────────────────
       - name: Upload JAR Artifacts
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
         uses: actions/upload-artifact@v4
         with:
           name: jar-files
           path: |
-            target/*-jar-with-dependencies.jar
-            target/*-all.jar
-            target/*.jar
+            target/*-shaded.jar
             "!target/original-*.jar"
           retention-days: 5
 
-      # 9️⃣  上传平台原生二进制
+      # ── 9. 上传各平台二进制 ────────────────────────────────────────────────
       - name: Upload Native Binaries
         uses: actions/upload-artifact@v4
         with:
@@ -181,18 +183,16 @@ jobs:
           path: target/native-image/biliTickerBuy-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
           retention-days: 5
 
-  # ---------- 发布阶段 ----------
+  # ────────────────────── 发布阶段 ─────────────────────────────────────────────
   release:
     needs: java-build
     runs-on: ubuntu-latest
     steps:
-      # 1️⃣ 下载全部产物到本地 artifacts/*
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      # 2️⃣ 每个产物目录各打一个 zip（方便 Release 附件）
       - name: Zip individual build artifacts
         run: |
           cd artifacts
@@ -200,11 +200,9 @@ jobs:
             zip -r "../${dir%/}.zip" "$dir"
           done
 
-      # 3️⃣ 生成日期（YYYY.MM.DD）给 tag / Release
-      - name: Set up date env
+      - name: Set up date
         run: echo "DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
 
-      # 4️⃣ 创建 GitHub Release 并上传全部 zip
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
