@@ -49,14 +49,16 @@ jobs:
       uses: actions/checkout@v4
 
     # 2️⃣  安装 GraalVM -------------------------------------------------------
-    - name: Setup GraalVM
+    - name: Setup Liberica NIK (with JavaFX)
       uses: graalvm/setup-graalvm@v1
       with:
+        distribution: 'liberica'        # Liberica Native Image Kit
+        java-package: 'jdk+fx'          # 带 JavaFX 模块！:contentReference[oaicite:1]{index=1}
         java-version: '21'
-        distribution: 'graalvm'
         architecture: ${{ matrix.arch }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        components: 'native-image'      # 多余保险
         native-image-job-reports: 'true'
+        github-token: ${{ secrets.GITHUB_TOKEN }}
 
     # 3️⃣  Maven 构建（生成 fat-jar）------------------------------------------
     - name: Build with Maven
