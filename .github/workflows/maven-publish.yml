@@ -2,6 +2,7 @@ name: Java Build and Release
 
 on:
   push:
+    branches: [ main ]     
     paths:
       - 'src/main/java/**'
       - '.github/workflows/maven-publish.yml'
@@ -45,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate build info
+      - name: Generate build info (date + commit)
         id: build_info
         run: |
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
@@ -56,63 +57,69 @@ jobs:
         with:
           java-version: '21'
           distribution: 'graalvm'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          native-image-job-reports: 'true'
           architecture: ${{ matrix.arch }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build with Maven
         run: mvn -B clean package --file pom.xml
 
-      - name: Upload JAR Artifact
+      - name: Upload fat‑jar artifact (per target)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}-${{ steps.build_info.outputs.build_id }}
           path: target/*-jar-with-dependencies.jar
           retention-days: 5
 
+
   release:
-    name: Publish Release
+    name: Release (${{ matrix.label }})
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - label: linux-amd64
+            artifact_name: biliTickerBuy-Linux-x86_64
+          - label: linux-arm64
+            artifact_name: biliTickerBuy-Linux-aarch64
+          - label: windows-amd64
+            artifact_name: biliTickerBuy-Windows-x86_64
+          - label: macos-amd64
+            artifact_name: biliTickerBuy-macOS-x86_64
+          - label: macos-arm64
+            artifact_name: biliTickerBuy-macOS-aarch64
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate release info
-        id: release_info
+      - name: Generate date & commit
+        id: rel_info
         run: |
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+          echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-
-      - name: Download all artifacts
+      - name: Download artifact for ${{ matrix.label }}
         uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-${{ steps.rel_info.outputs.date }}-${{ steps.rel_info.outputs.build_id }}
+          path: artifact
 
-      - name: Install 7‑Zip
-        run: sudo apt-get update && sudo apt-get install -y p7zip-full
-
-      - name: List workspace after download (debug)
-        run: |
-          echo "Workspace contents after artifacts download:"
-          find . -maxdepth 3 -print
-
-      - name: Compress JARs with 7‑Zip
+      - name: Rename jar for release
         run: |
           mkdir -p release
-          # Find every JAR (any depth) and compress individually
-          find . -type f -name '*.jar' -print0 | while IFS= read -r -d '' jar; do
-            base=$(basename "${jar}" .jar)
-            echo "Compressing ${jar} -> release/${base}.7z"
-            7z a "release/${base}.7z" "${jar}"
-          done
-          echo "Release assets:"
+          jar=$(ls artifact/*.jar | head -n1)
+          new_name="v-${{ steps.rel_info.outputs.date }}-${{ matrix.label }}.jar"
+          echo "Renaming $jar -> release/$new_name"
+          mv "$jar" "release/$new_name"
+          echo "Prepared files:"
           ls -l release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.release_info.outputs.date }}
-          name: Release ${{ steps.release_info.outputs.date }}
-          files: release/*.7z
+          tag_name: v-${{ steps.rel_info.outputs.date }}-${{ matrix.label }}
+          name: Release ${{ steps.rel_info.outputs.date }}‑${{ matrix.label }}
+          files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
