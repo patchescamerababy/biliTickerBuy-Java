@@ -86,13 +86,10 @@ jobs:
           --no-fallback `
           --enable-https --enable-http `
           -H:+JNI `
-          -H:ResourceConfigurationFiles=config/resource-config.json `
-          -H:ReflectionConfigurationFiles=config/reflect-config.json `
-          -H:JNIConfigurationFiles=config/jni-config.json `
-          -H:DynamicProxyConfigurationFiles=config/proxy-config.json `
-          -H:SerializationConfigurationFiles=config/serialization-config.json `
+          -H:ConfigurationFileDirectories=./config `
           -H:+AddAllCharsets -H:+IncludeAllLocales `
           -jar app.jar `
+          --static `
           -H:Name=biliTickerBuy-${{ matrix.label }}
         Pop-Location
 
@@ -111,12 +108,8 @@ jobs:
           --no-fallback \
           --enable-https --enable-http \
           -H:+JNI \
-          -H:ResourceConfigurationFiles=config/resource-config.json \
-          -H:ReflectionConfigurationFiles=config/reflect-config.json \
-          -H:JNIConfigurationFiles=config/jni-config.json \
-          -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
-          -H:SerializationConfigurationFiles=config/serialization-config.json \
-          -H:+AddAllCharsets -H:+IncludeAllLocales \
+          -H:ConfigurationFileDirectories=./config \
+          --static \
           --gc=G1 \
           -jar app.jar \
           -H:Name=biliTickerBuy-${{ matrix.label }}
@@ -137,12 +130,8 @@ jobs:
           --no-fallback \
           --enable-https --enable-http \
           -H:+JNI \
-          -H:ResourceConfigurationFiles=config/resource-config.json \
-          -H:ReflectionConfigurationFiles=config/reflect-config.json \
-          -H:JNIConfigurationFiles=config/jni-config.json \
-          -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
-          -H:SerializationConfigurationFiles=config/serialization-config.json \
-          -H:+AddAllCharsets -H:+IncludeAllLocales \
+          -H:ConfigurationFileDirectories=./config \
+          --static \
           -jar app.jar \
           -H:Name=biliTickerBuy-${{ matrix.label }}
         popd
