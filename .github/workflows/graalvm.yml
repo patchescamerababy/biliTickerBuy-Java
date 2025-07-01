@@ -63,7 +63,7 @@ jobs:
 
       - name: Build with Maven (executable JAR)
         run: |
-          mvn -B clean package org.apache.maven.plugins:maven-assembly-plugin:3.6.0:single --file pom.xml
+          mvn -B clean package --file pom.xml
 
 
       # —— Prepare 原生构建目录 —— #
