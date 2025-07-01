@@ -31,7 +31,6 @@ jobs:
           - os: windows-latest
             arch: amd64
             label: windows-amd64
-            static: true
             artifact_name: biliTickerBuy-Windows-x86_64
           - os: macos-latest
             arch: amd64
