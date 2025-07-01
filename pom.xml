@@ -16,29 +16,22 @@
         <jackson.version>2.9.10</jackson.version>
         <logback.version>1.2.12</logback.version>
         <slf4j.version>1.7.36</slf4j.version>
+        <javafx.version>21.0.2</javafx.version>
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-base</artifactId>
-            <version>21.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-controls</artifactId>
-            <version>21.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-graphics</artifactId>
-            <version>21.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-fxml</artifactId>
-            <version>21.0.2</version>
-        </dependency>
+     <dependency>
+      <groupId>org.openjfx</groupId><artifactId>javafx-base</artifactId><version>${javafx.version}</version>
+     </dependency>
+     <dependency>
+      <groupId>org.openjfx</groupId><artifactId>javafx-controls</artifactId><version>${javafx.version}</version>
+     </dependency>
+     <dependency>
+      <groupId>org.openjfx</groupId><artifactId>javafx-graphics</artifactId><version>${javafx.version}</version>
+     </dependency>
+     <dependency>
+      <groupId>org.openjfx</groupId><artifactId>javafx-fxml</artifactId><version>${javafx.version}</version>
+     </dependency>
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>okhttp</artifactId>
