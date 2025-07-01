@@ -120,7 +120,6 @@ jobs:
           -H:+UnlockExperimentalVMOptions -H:-CheckToolchain \
           --no-fallback --enable-https --enable-http \
           -H:+JNI -H:ConfigurationFileDirectories=./config \
-          --gc=G1 \
           -jar app.jar \
           -H:Name=biliTickerBuy-${{ matrix.label }}
         popd
