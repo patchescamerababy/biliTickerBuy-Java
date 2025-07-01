@@ -46,6 +46,7 @@ public class SettingsTab {
     private static List<JSONObject> buyerValue = new ArrayList<>();
     private static List<JSONObject> addrValue = new ArrayList<>();
     private static String projectName = "";
+    private static Accordion phoneAccordion;
 
     public static VBox create() {
         VBox layout = new VBox(10);
@@ -307,7 +308,7 @@ public class SettingsTab {
         // 3. Phone number section
         TitledPane phonePane = new TitledPane("填写你的当前账号所绑定的手机号[可选]", new TextField());
         phonePane.setExpanded(false);
-        Accordion phoneAccordion = new Accordion(phonePane);
+        phoneAccordion = new Accordion(phonePane);
 
 
         // 4. Ticket info section
@@ -475,7 +476,32 @@ public class SettingsTab {
                             ticket.put("screen_id", screen.getInt("id"));
                             ticket.put("project_id", data.getInt("id"));
                             ticketValue.add(ticket);
-                            String ticketStr = screen.getString("name") + " - " + ticket.getString("desc") + " - ￥" + ticket.getInt("price") / 100;
+
+                            // 仿照Python端，拼接票状态和起售时间
+                            String ticket_can_buy = "";
+                            if (ticket.has("sale_flag_number")) {
+                                int flag = ticket.getInt("sale_flag_number");
+                                switch (flag) {
+                                    case 1: ticket_can_buy = "不可售"; break;
+                                    case 2: ticket_can_buy = "预售"; break;
+                                    case 3: ticket_can_buy = "停售"; break;
+                                    case 4: ticket_can_buy = "售罄"; break;
+                                    case 5: ticket_can_buy = "不可用"; break;
+                                    case 6: ticket_can_buy = "库存紧张"; break;
+                                    case 8: ticket_can_buy = "暂时售罄"; break;
+                                    case 9: ticket_can_buy = "不在白名单"; break;
+                                    case 101: ticket_can_buy = "未开始"; break;
+                                    case 102: ticket_can_buy = "已结束"; break;
+                                    case 103: ticket_can_buy = "未完成"; break;
+                                    case 105: ticket_can_buy = "下架"; break;
+                                    case 106: ticket_can_buy = "已取消"; break;
+                                    default: ticket_can_buy = ""; break;
+                                }
+                            }
+                            String saleStart = ticket.has("sale_start") ? ticket.get("sale_start").toString() : "";
+                            String ticketStr = screen.getString("name") + " - " + ticket.getString("desc") + " - ￥" + (ticket.getDouble("price") / 100.0)
+                                + (ticket_can_buy.isEmpty() ? "" : ("- " + ticket_can_buy))
+                                + (saleStart.isEmpty() ? "" : (" - 【起售时间：" + saleStart + "】"));
                             ticketChoice.getItems().add(ticketStr);
                         }
                     }
@@ -577,6 +603,11 @@ public class SettingsTab {
         config.put("buyer", contact.getString("name"));
         config.put("tel", contact.getString("tel"));
 
+        // 从phonePane获取电话号码
+        TitledPane phonePane = (TitledPane) phoneAccordion.getPanes().get(0);
+        String phone = ((TextField) phonePane.getContent()).getText();
+        config.put("phone", phone != null ? phone : "");
+
         JSONObject deliverInfo = new JSONObject();
         deliverInfo.put("name", addr.getString("name"));
         deliverInfo.put("tel", addr.getString("phone"));
@@ -585,15 +616,7 @@ public class SettingsTab {
         config.put("deliver_info", deliverInfo);
 
         // 将cookies Map转换为JSONArray
-        JSONArray cookiesArray = new JSONArray();
-        java.util.Map<String, String> cookiesMap = biliRequest.getCookies();
-        for (java.util.Map.Entry<String, String> entry : cookiesMap.entrySet()) {
-            JSONObject cookieObj = new JSONObject();
-            cookieObj.put("name", entry.getKey());
-            cookieObj.put("value", entry.getValue());
-            cookiesArray.put(cookieObj);
-        }
-        config.put("cookies", cookiesArray);
+        config.put("cookies", biliRequest.getCookiesAsJson());
 
         String configString = config.toString(4);
         configOutputArea.setText(configString);
