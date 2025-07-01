@@ -28,7 +28,7 @@ jobs:
             arch: x64
             label: linux-amd64
             artifact_name: biliTickerBuy-Linux-x86_64
-          - os: ubuntu-22.04-arm     # arm64 公共 runner
+          - os: ubuntu-22.04-arm
             arch: aarch64
             label: linux-arm64
             artifact_name: biliTickerBuy-Linux-aarch64
@@ -42,7 +42,7 @@ jobs:
             arch: x64
             label: macos-amd64
             artifact_name: biliTickerBuy-macOS-x86_64
-          - os: macos-14            # Apple Silicon
+          - os: macos-14
             arch: aarch64
             label: macos-arm64
             artifact_name: biliTickerBuy-macOS-aarch64
@@ -61,7 +61,7 @@ jobs:
         with:
           java-version: '21'
           distribution: 'graalvm'
-          architecture: ${{ matrix.arch }}       # x64 / aarch64
+          architecture: ${{ matrix.arch }}   # x64 / aarch64
           cache: 'maven'
           native-image-job-reports: 'true'
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -72,13 +72,14 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          # 产物目录名中已包含架构与日期，供 Release job 使用
           name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}
           path: |
             target/*-jar-with-dependencies.jar
             target/*-all.jar
             target/*.jar
+            "!target/original-*.jar"      # <- 必须加引号才能正确排除
           retention-days: 5
+          if-no-files-found: error        # 若排除过多立即失败，便于排错
 
   release:
     name: Publish Release
@@ -102,10 +103,10 @@ jobs:
       - name: Compress each platform JAR
         run: |
           mkdir -p release
-          # 每一个 artifact 目录名形如 biliTickerBuy-<OS>-<ARCH>-YYYYMMDD
           for dir in biliTickerBuy-*; do
-            jar=$(find "$dir" -type f -name '*.jar' | head -n 1)
-            [ -f "$jar" ] || continue
+            # 只取第一个非 original-*.jar
+            jar=$(find "$dir" -type f -name '*.jar' ! -name 'original-*.jar' | head -n 1)
+            [ -f "$jar" ] || { echo "No valid JAR found in $dir"; continue; }
             base=$(basename "$dir")
             echo "Compressing $jar -> release/${base}.7z"
             7z a "release/${base}.7z" "$jar"
