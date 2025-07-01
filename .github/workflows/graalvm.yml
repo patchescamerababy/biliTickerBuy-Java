@@ -27,167 +27,205 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest   # ⇩ 5 个平台，均为非-static
+          - os: ubuntu-latest
             arch: amd64
             label: linux-amd64
+            static: false
           - os: ubuntu-latest
             arch: arm64
             label: linux-arm64
+            static: false
           - os: windows-latest
             arch: amd64
             label: windows-amd64
+            static: false
           - os: macos-latest
             arch: amd64
             label: macos-amd64
+            static: false
           - os: macos-latest
             arch: arm64
             label: macos-arm64
+            static: false
 
     steps:
-    # 1️⃣ Checkout
-    - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # 2️⃣ GraalVM
-    - uses: graalvm/setup-graalvm@v1
-      with:
-        java-version: '21'
-        distribution: 'graalvm'
-        architecture: ${{ matrix.arch }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        native-image-job-reports: 'true'
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+          architecture: ${{ matrix.arch }}
 
-    # 3️⃣ Maven buil
-    - name: Build with Maven
-      run: mvn -B clean package
+      - name: Build with Maven (executable JAR)
+        run: |
+          mvn -B clean package --file pom.xml
 
-    # 4️⃣ copy fat-jar → app.jar
-    - name: Prepare Native Build Dir
-      shell: bash
-      run: |
-        mkdir -p target/native-image
-        FAT=$(find target -maxdepth 1 -name "*.jar" | head -n1)
-        if [[ -z "$FAT" ]]; then
-          echo "jar not found"
-        fi
-        cp "$FAT" target/native-image/app.jar
-        ls -lh target/native-image
 
-    # 5️⃣ native-image  (Win)
-    - name: Build Native Image (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        Copy-Item -Path config -Dst target/native-image -Recurse -Force
-        Push-Location target/native-image
-        native-image.cmd `
-          -H:+AllowDeprecatedBuilderClassesOnImageClasspath `
-          --initialize-at-run-time -H:+UnlockExperimentalVMOptions -H:-CheckToolchain `
-          --no-fallback --enable-https --enable-http -H:+JNI `
-          -H:ResourceConfigurationFiles=config/resource-config.json `
-          -H:ReflectionConfigurationFiles=config/reflect-config.json `
-          -H:JNIConfigurationFiles=config/jni-config.json `
-          -H:DynamicProxyConfigurationFiles=config/proxy-config.json `
-          -H:SerializationConfigurationFiles=config/serialization-config.json `
-          -H:+AddAllCharsets -H:+IncludeAllLocales `
-          -jar app.jar -H:Name=biliTickerBuy-${{ matrix.label }}
-        Pop-Location
+      # —— Prepare 原生构建目录 —— #
+      - name: Prepare Native Build Directory (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p target/native-image
+          ls ./target -alSh
+          cp target/biliTickerBuy-1.0-SNAPSHOT.jar target/native-image/
 
-    # 6️⃣ native-image  (Linux)
-    - name: Build Native Image (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      shell: bash
-      run: |
-        cp -r config target/native-image/
-        pushd target/native-image
-        native-image \
-          -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
-          --initialize-at-run-time -H:+UnlockExperimentalVMOptions -H:-CheckToolchain \
-          --no-fallback --enable-https --enable-http -H:+JNI \
-          -H:ResourceConfigurationFiles=config/resource-config.json \
-          -H:ReflectionConfigurationFiles=config/reflect-config.json \
-          -H:JNIConfigurationFiles=config/jni-config.json \
-          -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
-          -H:SerializationConfigurationFiles=config/serialization-config.json \
-          -H:+AddAllCharsets -H:+IncludeAllLocales --gc=G1 \
-          -jar app.jar -H:Name=biliTickerBuy-${{ matrix.label }}
-        popd
+      - name: Prepare Native Build Directory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target\native-image
+          ls .\target
+          Copy-Item 
+            -Path target\biliTickerBuy-1.0-SNAPSHOT.jar 
+            -Destination target\native-image\
 
-    # 7️⃣ native-image  (macOS)
-    - name: Build Native Image (macOS)
-      if: matrix.os == 'macos-latest'
-      shell: bash
-      run: |
-        cp -r config target/native-image/
-        pushd target/native-image
-        native-image \
-          -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
-          --initialize-at-run-time -H:+UnlockExperimentalVMOptions -H:-CheckToolchain \
-          --no-fallback --enable-https --enable-http -H:+JNI \
-          -H:ResourceConfigurationFiles=config/resource-config.json \
-          -H:ReflectionConfigurationFiles=config/reflect-config.json \
-          -H:JNIConfigurationFiles=config/jni-config.json \
-          -H:DynamicProxyConfigurationFiles=config/proxy-config.json \
-          -H:SerializationConfigurationFiles=config/serialization-config.json \
-          -H:+AddAllCharsets -H:+IncludeAllLocales \
-          -jar app.jar -H:Name=biliTickerBuy-${{ matrix.label }}
-        popd
+      # —— Windows 原生镜像构建 —— #
+      - name: Build Native Image (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh            # ← 改为 pwsh
+        run: |
+          # 找到 fat-JAR（无论名字是什么）
+          $jar = Get-ChildItem -Path target -Filter '*-jar-with-dependencies.jar' | Select-Object -First 1
+          if (-not $jar) {
+            Write-Error "No fat JAR found in target"; exit 1
+          }
+      
+          # 创建 native-image 目录并准备文件
+          New-Item -ItemType Directory -Force -Path target\native-image
+          Copy-Item -Path config -Destination target\native-image\ -Recurse -Force
+          Copy-Item -Path $jar.FullName -Destination target\native-image\
+      
+          # 进入目录开始构建
+          Push-Location target\native-image
+          native-image.cmd 
+            -jar biliTickerBuy-1.0-SNAPSHOT.jar 
+            --initialize-at-run-time 
+            -H:+UnlockExperimentalVMOptions 
+            -H:-CheckToolchain 
+            --no-fallback 
+            --enable-https 
+            --enable-http 
+            -H:+JNI 
+            -H:ResourceConfigurationFiles=config/resource-config.json 
+            -H:ReflectionConfigurationFiles=config/reflect-config.json 
+            -H:JNIConfigurationFiles=config/jni-config.json 
+            -H:DynamicProxyConfigurationFiles=config/proxy-config.json 
+            -H:SerializationConfigurationFiles=config/serialization-config.json 
+            -H:+AddAllCharsets 
+            -H:+IncludeAllLocales 
+            -H:+AllowDeprecatedBuilderClassesOnImageClasspath
+            -H:Name=biliTickerBuy-${{ matrix.label }} 
+            ${{ matrix.static && '--static' || '' }}
+          Pop-Location
 
-    # 8️⃣ 整理输出：可执行 + 动态库 → dist/...
-    - name: Stage Binaries & Shared Libs
-      shell: bash
-      run: |
-        set -e
-        mkdir -p dist/${{ matrix.label }}
-        pushd target/native-image
-        BIN=biliTickerBuy-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-        cp "$BIN" *.so *.dylib *.dll 2>/dev/null || true
-        popd
-        mv target/native-image/* dist/${{ matrix.label }}/ || true
-        ls -R dist/${{ matrix.label }}
+      # —— Linux 原生镜像构建 —— #
+      - name: Build Native Image (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          cp -r config target/native-image/
+          pushd target/native-image
+          native-image \
+            --initialize-at-run-time \
+            -H:+UnlockExperimentalVMOptions \
+            -H:-CheckToolchain \
+            --no-fallback \
+            --enable-https \
+            --enable-http \
+            -H:+JNI \
+            -H:ResourceConfigurationFiles=config/resource-config.json -H:ReflectionConfigurationFiles=config/reflect-config.json -H:JNIConfigurationFiles=config/jni-config.json -H:DynamicProxyConfigurationFiles=config/proxy-config.json -H:SerializationConfigurationFiles=config/serialization-config.json \
+            -H:+AddAllCharsets \
+            -H:+IncludeAllLocales \
+            -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
+            --gc=G1 \
+            -jar biliTickerBuy-1.0-SNAPSHOT.jar \
+            -H:Name=biliTickerBuy-${{ matrix.label }} \
+            ${{ matrix.static && '--static' || '' }}
+          popd
 
-    # 9️⃣ 上传平台产物（含动态库）
-    - name: Upload Native Package
-      uses: actions/upload-artifact@v4
-      with:
-        name: biliTickerBuy-${{ matrix.label }}
-        path: dist/${{ matrix.label }}
-        retention-days: 5
+      # —— macOS 原生镜像构建 —— #
+      - name: Build Native Image (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          cp -r config target/native-image/
+          pushd target/native-image
+          native-image \
+            --initialize-at-run-time \
+            -H:+AllowDeprecatedBuilderClassesOnImageClasspath \
+            -H:+UnlockExperimentalVMOptions \
+            -H:-CheckToolchain \
+            --no-fallback \
+            --enable-https \
+            --enable-http \
+            -H:+JNI \
+            -H:ResourceConfigurationFiles=config/resource-config.json -H:ReflectionConfigurationFiles=config/reflect-config.json -H:JNIConfigurationFiles=config/jni-config.json -H:DynamicProxyConfigurationFiles=config/proxy-config.json -H:SerializationConfigurationFiles=config/serialization-config.json \
+            -H:+AddAllCharsets \
+            -H:+IncludeAllLocales \
+            -jar biliTickerBuy-1.0-SNAPSHOT.jar \
+            -H:Name=biliTickerBuy-${{ matrix.label }} \
+            ${{ matrix.static && '--static' || '' }}
+          popd
 
-    # 10️⃣ ubuntu-amd64 另行上传 JAR
-    - name: Upload JAR Artifacts
-      if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
-      uses: actions/upload-artifact@v4
-      with:
-        name: jar-files
-        path: |
-          target/*.jar
-          "!target/original-*.jar"
-        retention-days: 5
+      - name: Upload JAR Artifacts
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-files
+          path: |
+            target/*-jar-with-dependencies.jar
+            target/*-all.jar
+            target/*.jar
+            "!target/original-*.jar"      # <- 必须加引号才能正确排除
+          retention-days: 5
+          
+      - name: Upload Native Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: biliTickerBuy-${{ matrix.label }}
+          path: |
+            target/native-image/biliTickerBuy-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          retention-days: 5
 
-# ─────────────────────────── 发布阶段 ──────────────────────────────
+
   release:
     needs: java-build
     runs-on: ubuntu-latest
     steps:
-      - name: Download Artifacts
+      # 下载所有构建产物到 artifacts 目录
+      - name: Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: .
 
-      - name: Zip each artifact dir
+      # 对每个构建产物单独打包成 zip 文件
+      - name: Zip individual build artifacts for release
         run: |
-          cd artifacts
-          for dir in */ ; do
-            zip -r "../${dir%/}.zip" "$dir"
+          for dir in ./*; do
+            if [ -d "$dir" ]; then
+              zip -r "${dir}.zip" "$dir"
+            fi
           done
 
-      - name: Tag date
+      # 设置日期用于 release tag（格式为 YYYY.MM.DD）
+      - name: Set up date
+        id: date
         run: echo "DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
 
-      - name: Create GitHub Release
+      # 创建 release，并上传所有单独打包好的 zip 文件
+      - name: Create Release
+        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.DATE }}
           name: Release v${{ env.DATE }}
-          files: '*.zip'
+          draft: false
+          prerelease: false
+          files: ./*.zip
           token: ${{ secrets.GITHUB_TOKEN }}
