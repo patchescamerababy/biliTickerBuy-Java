@@ -79,54 +79,43 @@ jobs:
 
 
   release:
-    name: Release (${{ matrix.label }})
+    name: Publish Release
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - label: linux-amd64
-            artifact_name: biliTickerBuy-Linux-x86_64
-          - label: linux-arm64
-            artifact_name: biliTickerBuy-Linux-aarch64
-          - label: windows-amd64
-            artifact_name: biliTickerBuy-Windows-x86_64
-          - label: macos-amd64
-            artifact_name: biliTickerBuy-macOS-x86_64
-          - label: macos-arm64
-            artifact_name: biliTickerBuy-macOS-aarch64
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate date & commit
+      - name: Generate release info
         id: rel_info
+        shell: bash
         run: |
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
           echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Download artifact for ${{ matrix.label }}
+      - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-${{ steps.rel_info.outputs.date }}-${{ steps.rel_info.outputs.build_id }}
-          path: artifact
+          name: biliTickerBuy-${{ steps.rel_info.outputs.date }}-${{ steps.rel_info.outputs.build_id }}
+          path: jars
 
-      - name: Rename jar for release
+      - name: Prepare release assets
         run: |
           mkdir -p release
-          jar=$(ls artifact/*.jar | head -n1)
-          new_name="v-${{ steps.rel_info.outputs.date }}-${{ matrix.label }}.jar"
-          echo "Renaming $jar -> release/$new_name"
-          mv "$jar" "release/$new_name"
-          echo "Prepared files:"
+          # 将所有 jar 重命名为带日期前缀，方便区分
+          for jar in jars/**/*.jar; do
+            base=$(basename "$jar")
+            mv "$jar" "release/v-${{ steps.rel_info.outputs.date }}-$base"
+          done
+          echo "Release files:"
           ls -l release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v-${{ steps.rel_info.outputs.date }}-${{ matrix.label }}
-          name: Release ${{ steps.rel_info.outputs.date }}‑${{ matrix.label }}
+          tag_name: v-${{ steps.rel_info.outputs.date }}
+          name: Release ${{ steps.rel_info.outputs.date }}
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
