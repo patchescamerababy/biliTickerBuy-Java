@@ -2,6 +2,7 @@ name: Java Build and Release
 
 on:
   push:
+    branches: [ main ]
     paths:
       - 'src/main/java/**'
       - '.github/workflows/maven-publish.yml'
@@ -19,26 +20,30 @@ jobs:
     name: Build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # ---------- Linux ----------
           - os: ubuntu-latest
-            arch: amd64
+            arch: x64
             label: linux-amd64
             artifact_name: biliTickerBuy-Linux-x86_64
-          - os: ubuntu-latest
-            arch: arm64
+          - os: ubuntu-22.04-arm     # arm64 公共 runner
+            arch: aarch64
             label: linux-arm64
             artifact_name: biliTickerBuy-Linux-aarch64
+          # ---------- Windows ----------
           - os: windows-latest
-            arch: amd64
+            arch: x64
             label: windows-amd64
             artifact_name: biliTickerBuy-Windows-x86_64
+          # ---------- macOS ----------
           - os: macos-latest
-            arch: amd64
+            arch: x64
             label: macos-amd64
             artifact_name: biliTickerBuy-macOS-x86_64
-          - os: macos-14
-            arch: arm64
+          - os: macos-14            # Apple Silicon
+            arch: aarch64
             label: macos-arm64
             artifact_name: biliTickerBuy-macOS-aarch64
 
@@ -48,16 +53,18 @@ jobs:
       - name: Generate build info
         id: build_info
         run: |
-          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-          echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+          echo "build_id=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
           java-version: '21'
           distribution: 'graalvm'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          architecture: ${{ matrix.arch }}       # x64 / aarch64
+          cache: 'maven'
           native-image-job-reports: 'true'
-          architecture: ${{ matrix.arch }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build with Maven
         run: mvn -B clean package --file pom.xml
@@ -65,7 +72,8 @@ jobs:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}-${{ steps.build_info.outputs.build_id }}
+          # 产物目录名中已包含架构与日期，供 Release job 使用
+          name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}
           path: |
             target/*-jar-with-dependencies.jar
             target/*-all.jar
@@ -83,29 +91,28 @@ jobs:
 
       - name: Generate release info
         id: release_info
-        run: |
-          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        run: echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: Install 7‑Zip
+      - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      - name: List workspace after download (debug)
-        run: |
-          echo "Workspace contents after artifacts download:"
-          find . -maxdepth 3 -print
-      - name: Compress JARs with 7‑Zip
+      - name: Compress each platform JAR
         run: |
           mkdir -p release
-          # Find every JAR (any depth) and compress individually
-          find . -type f -name '*.jar' -print0 | while IFS= read -r -d '' jar; do
-            base=$(basename "${jar}" .jar)
-            echo "Compressing ${jar} -> release/${base}.7z"
-            7z a "release/${base}.7z" "${jar}"
+          # 每一个 artifact 目录名形如 biliTickerBuy-<OS>-<ARCH>-YYYYMMDD
+          for dir in biliTickerBuy-*; do
+            jar=$(find "$dir" -type f -name '*.jar' | head -n 1)
+            [ -f "$jar" ] || continue
+            base=$(basename "$dir")
+            echo "Compressing $jar -> release/${base}.7z"
+            7z a "release/${base}.7z" "$jar"
           done
           echo "Release assets:"
           ls -l release
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
