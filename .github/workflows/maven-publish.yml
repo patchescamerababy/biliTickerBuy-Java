@@ -84,6 +84,7 @@ jobs:
         run: |
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
@@ -110,8 +111,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.release_info.outputs.version }}-${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }}
-          name: Release ${{ steps.release_info.outputs.version }} (${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }})
+          tag_name: v${{ steps.release_info.outputs.date }}
+          name: Release ${{ steps.release_info.outputs.date }}
           files: release/*.7z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
