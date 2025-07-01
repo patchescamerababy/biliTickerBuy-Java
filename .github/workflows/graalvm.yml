@@ -72,15 +72,17 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/native-image
-          cp target/biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar target/native-image/
+          ls ./target -alSh
+          cp target/biliTickerBuy-1.0-SNAPSHOT.jar target/native-image/
 
       - name: Prepare Native Build Directory (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path target\native-image
+          ls .\target
           Copy-Item `
-            -Path target\biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar `
+            -Path target\biliTickerBuy-1.0-SNAPSHOT.jar `
             -Destination target\native-image\
 
       # —— Windows 原生镜像构建 —— #
