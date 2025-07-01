@@ -63,11 +63,18 @@ jobs:
       - name: Build with Maven
         run: mvn -B clean package --file pom.xml
 
-      - name: Upload fat‑jar artifact (per target)
+      - name: Show target directory (debug)
+        run: ls -R target
+
+      - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}-${{ steps.build_info.outputs.build_id }}
-          path: target/*-jar-with-dependencies.jar
+          # 兼容常见 Shade/Assembly 命名：*-jar-with-dependencies.jar、*-all.jar，或者默认 *.jar
+          path: |
+            target/*-jar-with-dependencies.jar
+            target/*-all.jar
+            target/*.jar
           retention-days: 5
 
 
