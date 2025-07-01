@@ -83,26 +83,26 @@ jobs:
         id: release_info
         run: |
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-          echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Download all JAR artifacts
-        # No path => extracted into separate folders under workspace
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: Compress JARs with 7-Zip
+      - name: Install 7‑Zip
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: List workspace after download (debug)
+        run: |
+          echo "Workspace contents after artifacts download:"
+          find . -maxdepth 3 -print
+
+      - name: Compress JARs with 7‑Zip
         run: |
           mkdir -p release
-          # iterate through every extracted artifact directory
-          for dir in */ ; do
-            [ -d "$dir" ] || continue  # skip if none
-            # pick first jar inside that dir (there will be exactly one)
-            if ls "$dir"/*.jar 1>/dev/null 2>&1; then
-              artifact=$(basename "$dir")
-              jar_file=$(ls "$dir"/*.jar | head -n1)
-              7z a "release/${artifact}.7z" "$jar_file"
-            fi
+          # Find every JAR (any depth) and compress individually
+          find . -type f -name '*.jar' -print0 | while IFS= read -r -d '' jar; do
+            base=$(basename "${jar}" .jar)
+            echo "Compressing ${jar} -> release/${base}.7z"
+            7z a "release/${base}.7z" "${jar}"
           done
           echo "Release assets:"
           ls -l release
