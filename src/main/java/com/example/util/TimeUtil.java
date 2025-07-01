@@ -1,6 +1,10 @@
 package com.example.util;
 
 import java.net.InetAddress;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.net.ntp.NTPUDPClient;
 import org.apache.commons.net.ntp.TimeInfo;
@@ -35,11 +39,20 @@ public class TimeUtil {
                     if (i == 2) {
                         return "error";
                     }
-                    Thread.sleep(500);
+                    // 高效等待，避免忙等待
+                    ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
+                    try {
+                        CountDownLatch latch = new CountDownLatch(1);
+                        scheduler.schedule(latch::countDown, 500, TimeUnit.MILLISECONDS);
+                        latch.await();
+                    } catch (InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    } finally {
+                        scheduler.shutdown();
+                    }
                 }
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
         } finally {
             client.close();
         }
