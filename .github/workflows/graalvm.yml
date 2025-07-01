@@ -1,0 +1,224 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - '.github/workflows/graalvm.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - '.github/workflows/graalvm.yml'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  java-build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            label: linux-amd64
+            static: false
+          - os: ubuntu-latest
+            arch: arm64
+            label: linux-arm64
+            static: false
+          - os: windows-latest
+            arch: amd64
+            label: windows-amd64
+            static: false
+          - os: macos-latest
+            arch: amd64
+            label: macos-amd64
+            static: false
+          - os: macos-latest
+            arch: arm64
+            label: macos-arm64
+            static: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+          architecture: ${{ matrix.arch }}
+
+      - name: Build with Maven (executable JAR)
+        run: |
+          mvn -B clean package org.apache.maven.plugins:maven-assembly-plugin:3.6.0:single --file pom.xml
+
+
+      # —— Prepare 原生构建目录 —— #
+      - name: Prepare Native Build Directory (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p target/native-image
+          cp target/biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar target/native-image/
+
+      - name: Prepare Native Build Directory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target\native-image
+          Copy-Item `
+            -Path target\biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar `
+            -Destination target\native-image\
+
+      # —— Windows 原生镜像构建 —— #
+      - name: Build Native Image (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh            # ← 改为 pwsh
+        run: |
+          # 找到 fat-JAR（无论名字是什么）
+          $jar = Get-ChildItem -Path target -Filter '*-jar-with-dependencies.jar' | Select-Object -First 1
+          if (-not $jar) {
+            Write-Error "No fat JAR found in target"; exit 1
+          }
+      
+          # 创建 native-image 目录并准备文件
+          New-Item -ItemType Directory -Force -Path target\native-image
+          Copy-Item -Path src\config -Destination target\native-image\ -Recurse -Force
+          Copy-Item -Path $jar.FullName -Destination target\native-image\
+      
+          # 进入目录开始构建
+          Push-Location target\native-image
+          native-image.cmd `
+            -jar $($jar.Name) `
+            --initialize-at-run-time `
+            -H:+UnlockExperimentalVMOptions `
+            -H:-CheckToolchain `
+            --no-fallback `
+            --enable-https `
+            --enable-http `
+            -H:+JNI `
+            -H:ResourceConfigurationFiles=config/resource-config.json `
+            -H:ReflectionConfigurationFiles=config/reflect-config.json `
+            -H:JNIConfigurationFiles=config/jni-config.json `
+            -H:DynamicProxyConfigurationFiles=config/proxy-config.json `
+            -H:SerializationConfigurationFiles=config/serialization-config.json `
+            -H:+AddAllCharsets `
+            -H:+IncludeAllLocales `
+            -H:Name=biliTickerBuy-${{ matrix.label }} `
+            ${{ matrix.static && '--static' || '' }}
+          Pop-Location
+
+      # —— Linux 原生镜像构建 —— #
+      - name: Build Native Image (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          cp -r src/config target/native-image/
+          pushd target/native-image
+          native-image \
+            --initialize-at-run-time \
+            -H:+UnlockExperimentalVMOptions \
+            -H:-CheckToolchain \
+            --no-fallback \
+            --enable-https \
+            --enable-http \
+            -H:+JNI \
+            -H:ResourceConfigurationFiles=config/resource-config.json -H:ReflectionConfigurationFiles=config/reflect-config.json -H:JNIConfigurationFiles=config/jni-config.json -H:DynamicProxyConfigurationFiles=config/proxy-config.json -H:SerializationConfigurationFiles=config/serialization-config.json \
+            -H:+AddAllCharsets \
+            -H:+IncludeAllLocales \
+            --gc=G1 \
+            -jar biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar \
+            -H:Name=biliTickerBuy-${{ matrix.label }} \
+            ${{ matrix.static && '--static' || '' }}
+          popd
+
+      # —— macOS 原生镜像构建 —— #
+      - name: Build Native Image (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          cp -r src/config target/native-image/
+          pushd target/native-image
+          native-image \
+            --initialize-at-run-time \
+            -H:+UnlockExperimentalVMOptions \
+            -H:-CheckToolchain \
+            --no-fallback \
+            --enable-https \
+            --enable-http \
+            -H:+JNI \
+            -H:ResourceConfigurationFiles=config/resource-config.json -H:ReflectionConfigurationFiles=config/reflect-config.json -H:JNIConfigurationFiles=config/jni-config.json -H:DynamicProxyConfigurationFiles=config/proxy-config.json -H:SerializationConfigurationFiles=config/serialization-config.json \
+            -H:+AddAllCharsets \
+            -H:+IncludeAllLocales \
+            -jar biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar \
+            -H:Name=biliTickerBuy-${{ matrix.label }} \
+            ${{ matrix.static && '--static' || '' }}
+          popd
+
+      - name: Upload JAR Artifacts
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-files
+          path: |
+            target/*-with-dependencies.jar
+            target/*-sources.jar
+            target/*-javadoc.jar
+          retention-days: 5
+      - name: Upload Native Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: biliTickerBuy-${{ matrix.label }}
+          path: |
+            target/native-image/biliTickerBuy-${{ matrix.label }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          retention-days: 5
+
+
+  release:
+    needs: java-build
+    runs-on: ubuntu-latest
+    steps:
+      # 下载所有构建产物到 artifacts 目录
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: .
+
+      # 对每个构建产物单独打包成 zip 文件
+      - name: Zip individual build artifacts for release
+        run: |
+          for dir in ./*; do
+            if [ -d "$dir" ]; then
+              zip -r "${dir}.zip" "$dir"
+            fi
+          done
+
+      # 设置日期用于 release tag（格式为 YYYY.MM.DD）
+      - name: Set up date
+        id: date
+        run: echo "DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+
+      # 创建 release，并上传所有单独打包好的 zip 文件
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.DATE }}
+          name: Release v${{ env.DATE }}
+          draft: false
+          prerelease: false
+          files: ./*.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
