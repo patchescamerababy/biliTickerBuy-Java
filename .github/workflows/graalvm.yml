@@ -90,12 +90,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh            # ← 改为 pwsh
         run: |
-          # 找到 fat-JAR（无论名字是什么）
-          $jar = Get-ChildItem -Path target -Filter '*-jar-with-dependencies.jar' | Select-Object -First 1
-          if (-not $jar) {
-            Write-Error "No fat JAR found in target"; exit 1
-          }
-      
+
           # 创建 native-image 目录并准备文件
           New-Item -ItemType Directory -Force -Path target\native-image
           Copy-Item -Path config -Destination target\native-image\ -Recurse -Force
