@@ -140,6 +140,62 @@ jobs:
           -H:Name=biliTickerBuy-${{ matrix.label }}
         popd
 
-    # 7️⃣  Package + upload (保持不变) ----------------------------------------
+    # 8️⃣  打包可执行文件 + 动态库 -------------------------------------------
+    - name: Stage Native Package
+      shell: bash
+      run: |
+        set -e
+        OUT=dist/${{ matrix.label }}
+        mkdir -p "$OUT"
+        cp -r target/native-image/* "$OUT"/
+        ls -R "$OUT"
 
-    # …（后续 Stage - dist/ / Upload / Release 步骤保持和之前相同）…
+    # 9️⃣  上传平台产物 -------------------------------------------------------
+    - name: Upload Native Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: biliTickerBuy-${{ matrix.label }}
+        path: dist/${{ matrix.label }}
+        retention-days: 5
+
+    # 🔟  仅 linux-amd64 上传 fat-jar ----------------------------------------
+    - name: Upload JAR Artifacts
+      if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
+      uses: actions/upload-artifact@v4
+      with:
+        name: jar-files
+        path: |
+          target/*.jar
+          !target/original-*.jar
+        retention-days: 5
+
+# ───────────────────────── 发布阶段 ──────────────────────────────
+  release:
+    needs: java-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip Each Artifact Directory
+        shell: bash
+        run: |
+          cd artifacts
+          for dir in */ ; do
+            zip -r "../${dir%/}.zip" "$dir"
+          done
+
+      - name: Set Up Date
+        run: echo "DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.DATE }}
+          name: Release v${{ env.DATE }}
+          files: '*.zip'
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
