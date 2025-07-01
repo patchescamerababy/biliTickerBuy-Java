@@ -4,6 +4,10 @@ import java.io.File;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONObject;
 
@@ -17,6 +21,8 @@ import javafx.application.Platform;
 import javafx.scene.control.TextArea;
 
 public class BuyTask implements Runnable {
+
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(BuyTask.class);
 
     // 静态变量：保存最近一次加载的cookie信息（字符串或JSONArray）
     private static String lastLoadedCookies = "";
@@ -36,6 +42,9 @@ public class BuyTask implements Runnable {
     private String mode;
     private int totalAttempts;
     private TextArea logArea;
+
+    // 定时等待工具
+    private ScheduledExecutorService retryScheduler;
 
     // 命令行模式参数
     private String ticketsInfoStr;
@@ -65,6 +74,7 @@ public class BuyTask implements Runnable {
         this.isCliMode = false;
         this.serverChanToken = serverChanToken;
         this.pushPlusToken = pushPlusToken;
+        this.retryScheduler = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
     }
 
     // 命令行构造方法
@@ -116,12 +126,24 @@ public class BuyTask implements Runnable {
                 LocalDateTime targetTime = LocalDateTime.parse(targetTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
                 updateLog("等待目标时间: " + targetTimeStr);
 
-                while (LocalDateTime.now().plusSeconds((long) offset).isBefore(targetTime)) {
-                    if (Thread.currentThread().isInterrupted()) {
-                        Platform.runLater(() -> logArea.appendText("任务被中断\n"));
-                        return;
+                LocalDateTime currentTime = LocalDateTime.now().plusSeconds((long) offset);
+                if (currentTime.isBefore(targetTime)) {
+                    long delayMillis = java.time.Duration.between(currentTime, targetTime).toMillis();
+                    if (delayMillis > 0) {
+                        CountDownLatch latch = new CountDownLatch(1);
+                        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
+
+                        scheduler.schedule(() -> latch.countDown(), delayMillis, TimeUnit.MILLISECONDS);
+
+                        try {
+                            latch.await();
+                        } catch (InterruptedException ex) {
+                            Platform.runLater(() -> logArea.appendText("任务被中断\n"));
+                            scheduler.shutdown();
+                            return;
+                        }
+                        scheduler.shutdown();
                     }
-                    Thread.sleep(100);
                 }
             }
 
@@ -161,34 +183,35 @@ public class BuyTask implements Runnable {
                     tokenPayload.put("token", "");
                     tokenPayload.put("newRisk", true);
 
-                    okhttp3.Response prepareResponse = biliRequest.prepareOrder(projectId, tokenPayload.toString());
-                    String contentType = prepareResponse.header("Content-Type");
-                    prepareBody = prepareResponse.body().string();
+                    try (okhttp3.Response prepareResponse = biliRequest.prepareOrder(projectId, tokenPayload.toString())) {
+                        String contentType = prepareResponse.header("Content-Type");
+                        prepareBody = prepareResponse.body().string();
 
-                    if (contentType == null || !contentType.contains("application/json")) {
-                        updateLog(String.format("订单准备响应非JSON (%s)，跳过. 响应体: %s", contentType, prepareBody));
-                        Thread.sleep(interval);
-                        continue;
-                    }
-
-                    JSONObject prepareResult = new JSONObject(prepareBody);
-                    int prepareErrno = prepareResult.optInt("errno", prepareResult.optInt("code"));
-
-                    if (prepareErrno != 0) {
-                        updateLog("订单准备失败: " + prepareBody);
-                        if (prepareErrno == -401) {
-                            updateLog("需要验证码，当前版本暂不支持，请稍后重试。");
-                            break;
+                        if (contentType == null || !contentType.contains("application/json")) {
+                            updateLog(String.format("订单准备响应非JSON (%s)，跳过. 响应体: %s", contentType, prepareBody));
+                            if (waitForInterval()) return;
+                            continue;
                         }
-                        Thread.sleep(interval);
-                        continue;
+
+                        JSONObject prepareResult = new JSONObject(prepareBody);
+                        int prepareErrno = prepareResult.optInt("errno", prepareResult.optInt("code"));
+
+                        if (prepareErrno != 0) {
+                            updateLog("订单准备失败: " + prepareBody);
+                            if (prepareErrno == -401) {
+                                updateLog("需要验证码，当前版本暂不支持，请稍后重试。");
+                                break;
+                            }
+                            if (waitForInterval()) return;
+                            continue;
+                        }
+                        token = prepareResult.getJSONObject("data").getString("token");
                     }
-                    token = prepareResult.getJSONObject("data").getString("token");
                 } catch (Exception e) {
                     String errorLog = String.format("订单准备时发生异常: %s. 响应体: %s", e.getMessage(), prepareBody);
                     updateLog(errorLog);
-                    e.printStackTrace();
-                    Thread.sleep(interval);
+                    logger.error("订单准备异常", e);
+                    if (waitForInterval()) return;
                     continue;
                 }
 
@@ -208,61 +231,63 @@ public class BuyTask implements Runnable {
                     try {
                         // 与Python保持一致: int(time.time()) * 100
                         payload.put("timestamp", (int) (System.currentTimeMillis() / 1000) * 100);
-                        okhttp3.Response createResponse = biliRequest.createOrder(projectId, payload.toString());
-                        String contentType = createResponse.header("Content-Type");
-                        createBody = createResponse.body().string();
+                        try (okhttp3.Response createResponse = biliRequest.createOrder(projectId, payload.toString())) {
+                            String contentType = createResponse.header("Content-Type");
+                            createBody = createResponse.body().string();
 
-                        if (contentType != null && contentType.contains("application/json")) {
-                            JSONObject createResult = new JSONObject(createBody);
-                            int createErrno = createResult.optInt("errno", createResult.optInt("code"));
-                            String msg = createResult.optString("msg", createResult.optString("message", ""));
-//                            updateLog(String.format("[尝试 %d/60] [%d](%s) | %s", i + 1, createErrno, msg, createBody));
-                            updateLog(String.format("[尝试 %d/%d] [%d](%s) | %s", (i + 1) + (attempts - 1) * 60, attempts * 60, createErrno, msg, createBody));
+                            if (contentType != null && contentType.contains("application/json")) {
+                                JSONObject createResult = new JSONObject(createBody);
+                                int createErrno = createResult.optInt("errno", createResult.optInt("code"));
+                                String msg = createResult.optString("msg", createResult.optString("message", ""));
+                                //                            updateLog(String.format("[尝试 %d/60] [%d](%s) | %s", i + 1, createErrno, msg, createBody));
+                                updateLog(String.format("[尝试 %d/%d] [%d](%s) | %s", (i + 1) + (attempts - 1) * 60, attempts * 60, createErrno, msg, createBody));
 
-                            if (createErrno == 0 || createErrno == 100048 || createErrno == 100079) {
-                                updateLog("3) 抢票成功，获取付款二维码");
-                                String orderId = String.valueOf(createResult.getJSONObject("data").get("orderId"));
+                                if (createErrno == 0 || createErrno == 100048 || createErrno == 100079) {
+                                    updateLog("3) 抢票成功，获取付款二维码");
+                                    String orderId = String.valueOf(createResult.getJSONObject("data").get("orderId"));
 
-                                okhttp3.Response payParamResponse = biliRequest.getPayParam(orderId);
-                                String payParamBody = payParamResponse.body().string();
-                                JSONObject payParamJson = new JSONObject(payParamBody);
+                                    try (okhttp3.Response payParamResponse = biliRequest.getPayParam(orderId)) {
+                                        String payParamBody = payParamResponse.body().string();
+                                        JSONObject payParamJson = new JSONObject(payParamBody);
 
-                                if (payParamJson.optInt("errno", payParamJson.optInt("code")) == 0) {
-                                    String codeUrl = payParamJson.getJSONObject("data").getString("code_url");
-                                    updateLog("获取到二维码URL，正在生成...");
-                                    QRCodeUtil.showQRCode(codeUrl);
-                                    isSuccess = true;
+                                        if (payParamJson.optInt("errno", payParamJson.optInt("code")) == 0) {
+                                            String codeUrl = payParamJson.getJSONObject("data").getString("code_url");
+                                            updateLog("获取到二维码URL，正在生成...");
+                                            QRCodeUtil.showQRCode(codeUrl);
+                                            isSuccess = true;
 
-                                    // Send notifications
-                                    String successTitle = "抢票成功";
-                                    String successMessage = "订单号: " + orderId;
-                                    if (pushPlusToken != null && !pushPlusToken.isEmpty()) {
-                                        PushPlusUtil.sendMessage(pushPlusToken, successTitle, successMessage);
+                                            // Send notifications
+                                            String successTitle = "抢票成功";
+                                            String successMessage = "订单号: " + orderId;
+                                            if (pushPlusToken != null && !pushPlusToken.isEmpty()) {
+                                                PushPlusUtil.sendMessage(pushPlusToken, successTitle, successMessage);
+                                            }
+                                            if (serverChanToken != null && !serverChanToken.isEmpty()) {
+                                                ServerChanUtil.sendMessage(serverChanToken, successTitle, successMessage);
+                                            }
+                                        } else {
+                                            updateLog("获取二维码失败: " + payParamBody);
+                                        }
                                     }
-                                    if (serverChanToken != null && !serverChanToken.isEmpty()) {
-                                        ServerChanUtil.sendMessage(serverChanToken, successTitle, successMessage);
-                                    }
-                                } else {
-                                    updateLog("获取二维码失败: " + payParamBody);
+                                    break; // Break create order loop on success
+                                } else if (createErrno == 100051 || createErrno == 100003) {
+                                    updateLog("Token过期或已存在订单，需要重新准备订单");
+                                    break; // Break create order loop to re-prepare
                                 }
-                                break; // Break create order loop on success
-                            } else if (createErrno == 100051 || createErrno == 100003) {
-                                updateLog("Token过期或已存在订单，需要重新准备订单");
-                                break; // Break create order loop to re-prepare
+                            } else {
+                                int httpCode = createResponse.code();
+                                //                             updateLog(String.format("[尝试 %d/60] [%d]", i + 1,httpCode));
+                                updateLog(String.format("[尝试 %d/%d] [%d]", (i + 1) + (attempts - 1) * 60, attempts * 60, httpCode));
                             }
-                        } else {
-                            int httpCode = createResponse.code();
-//                             updateLog(String.format("[尝试 %d/60] [%d]", i + 1,httpCode));
-                            updateLog(String.format("[尝试 %d/%d] [%d]", (i + 1) + (attempts - 1) * 60, attempts * 60, httpCode));
                         }
                     } catch (Exception e) {
                         String errorLog = String.format("[尝试 %d/%d] 创建订单时发生异常: %s. 响应体: %s", (i + 1) + (attempts - 1) * 60, attempts * 60, e.getMessage(), createBody);
                         updateLog(errorLog);
-                        e.printStackTrace();
+                        logger.error("创建订单异常", e);
                     }
 
                     // Wait for the interval before the next attempt
-                    Thread.sleep(interval);
+                    if (waitForInterval()) return;
                 }
 
                 if (isSuccess) {
@@ -274,13 +299,33 @@ public class BuyTask implements Runnable {
 
         } catch (Exception e) {
             updateLog("任务失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("任务失败", e);
+        } finally {
+            if (retryScheduler != null && !retryScheduler.isShutdown()) {
+                retryScheduler.shutdown();
+            }
         }
     }
 
     private void updateLog(String message) {
         String timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Platform.runLater(() -> logArea.appendText("[" + timestamp + "] " + configFile.getName() + ": " + message + "\n"));
+    }
+
+    // 高效等待工具方法，避免忙等待
+    private boolean waitForInterval() {
+        if (interval <= 0) return false;
+
+        CountDownLatch latch = new CountDownLatch(1);
+        retryScheduler.schedule(() -> latch.countDown(), interval, TimeUnit.MILLISECONDS);
+
+        try {
+            latch.await();
+            return false; // 正常等待完成
+        } catch (InterruptedException ex) {
+            updateLog("任务被中断");
+            return true; // 被中断，需要返回
+        }
     }
 
     // 命令行模式逻辑
@@ -293,8 +338,22 @@ public class BuyTask implements Runnable {
             if (cliTimeStart != null && !cliTimeStart.isEmpty()) {
                 System.out.println("等待目标时间: " + cliTimeStart);
                 LocalDateTime targetTime = LocalDateTime.parse(cliTimeStart, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-                while (LocalDateTime.now().isBefore(targetTime)) {
-                    Thread.sleep(100);
+                LocalDateTime currentTime = LocalDateTime.now();
+                if (currentTime.isBefore(targetTime)) {
+                    long delayMillis = java.time.Duration.between(currentTime, targetTime).toMillis();
+                    if (delayMillis > 0) {
+                        CountDownLatch latch = new CountDownLatch(1);
+                        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());//系统所有线程
+                        scheduler.schedule(latch::countDown, delayMillis, TimeUnit.MILLISECONDS);
+
+                        try {
+                            latch.await();
+                        } catch (InterruptedException ex) {
+                            scheduler.shutdown();
+                            return;
+                        }
+                        scheduler.shutdown();
+                    }
                 }
             }
 
@@ -309,12 +368,26 @@ public class BuyTask implements Runnable {
                     break;
                 }
 
-                Thread.sleep(cliInterval);
+                // 命令行模式下的等待优化
+                if (cliInterval > 0) {
+                    CountDownLatch latch = new CountDownLatch(1);
+                    ScheduledExecutorService cliScheduler = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
+
+                    cliScheduler.schedule(latch::countDown, cliInterval, TimeUnit.MILLISECONDS);
+
+                    try {
+                        latch.await();
+                    } catch (InterruptedException ex) {
+                        cliScheduler.shutdown();
+                        return;
+                    }
+                    cliScheduler.shutdown();
+                }
             }
             System.out.println("命令行抢票任务结束。");
         } catch (Exception e) {
             System.err.println("命令行抢票任务失败: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("命令行任务失败", e);
         }
     }
 }
