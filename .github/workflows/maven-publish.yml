@@ -2,7 +2,6 @@ name: Java Build and Release
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'src/main/java/**'
       - '.github/workflows/maven-publish.yml'
@@ -17,50 +16,56 @@ permissions:
 
 jobs:
   build:
-    name: Build (${​{ matrix.label }})
-    runs-on: ${​{ matrix.os }}
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             arch: amd64
             label: linux-amd64
+            artifact_name: biliTickerBuy-Linux-x86_64
           - os: ubuntu-latest
             arch: arm64
             label: linux-arm64
+            artifact_name: biliTickerBuy-Linux-aarch64
           - os: windows-latest
             arch: amd64
             label: windows-amd64
+            artifact_name: biliTickerBuy-Windows-x86_64
           - os: macos-latest
             arch: amd64
             label: macos-amd64
+            artifact_name: biliTickerBuy-macOS-x86_64
           - os: macos-14
             arch: arm64
             label: macos-arm64
+            artifact_name: biliTickerBuy-macOS-aarch64
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate date
-        id: build_date
-        shell: bash
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Set up GraalVM (Java 21)
+      - name: Generate build info
+        id: build_info
+        run: |
+          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+          echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Setup GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
           java-version: '21'
-          distribution: graalvm
-          architecture: ${​{ matrix.arch }}
-          github-token: ${​{ secrets.GITHUB_TOKEN }}
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+          architecture: ${{ matrix.arch }}
 
       - name: Build with Maven
         run: mvn -B clean package --file pom.xml
 
-      - name: Upload JAR artifact
+      - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: biliTickerBuy-${​{ steps.build_date.outputs.date }}-${​{ matrix.label }}
+          name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}-${{ steps.build_info.outputs.build_id }}
           path: |
             target/*-jar-with-dependencies.jar
             target/*-all.jar
@@ -76,21 +81,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate date
-        id: rel_date
-        shell: bash
-        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Download all build artifacts
+      - name: Generate release info
+        id: release_info
+        run: |
+          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
-        with:
-          path: release
 
+      - name: Install 7‑Zip
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: List workspace after download (debug)
+        run: |
+          echo "Workspace contents after artifacts download:"
+          find . -maxdepth 3 -print
+      - name: Compress JARs with 7‑Zip
+        run: |
+          mkdir -p release
+          # Find every JAR (any depth) and compress individually
+          find . -type f -name '*.jar' -print0 | while IFS= read -r -d '' jar; do
+            base=$(basename "${jar}" .jar)
+            echo "Compressing ${jar} -> release/${base}.7z"
+            7z a "release/${base}.7z" "${jar}"
+          done
+          echo "Release assets:"
+          ls -l release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v-${​{ steps.rel_date.outputs.date }}
-          name: Release ${​{ steps.rel_date.outputs.date }}
-          files: release/**/*.jar
+          tag_name: v${{ steps.release_info.outputs.date }}
+          name: Release ${{ steps.release_info.outputs.date }}
+          files: release/*.7z
         env:
-          GITHUB_TOKEN: ${​{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
