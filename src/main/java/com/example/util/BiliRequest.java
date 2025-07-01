@@ -151,6 +151,10 @@ public class BiliRequest {
         return cookieManager.getRawCookies();
     }
 
+    public JSONArray getCookiesAsJson() {
+        return cookieManager.getRawCookies();
+    }
+
     /**
      * 用cookie请求B站接口，获取用户昵称
      */
@@ -165,10 +169,18 @@ public class BiliRequest {
             String url = "https://api.bilibili.com/x/web-interface/nav";
             Response response = get(url);
             if (response.isSuccessful()) {
-                String responseBody = response.body().string();
-                org.json.JSONObject json = new org.json.JSONObject(responseBody);
+                String responseBody = null;
+                if (response.body() != null) {
+                    responseBody = response.body().string();
+                }
+                org.json.JSONObject json = null;
+                if (responseBody != null) {
+                    json = new org.json.JSONObject(responseBody);
+                }
                 // 返回result["data"]["uname"]
-                return json.getJSONObject("data").getString("uname");
+                if (json != null) {
+                    return json.getJSONObject("data").getString("uname");
+                }
             }
         } catch (Exception e) {
             logger.error("Failed to get user nickname", e);
