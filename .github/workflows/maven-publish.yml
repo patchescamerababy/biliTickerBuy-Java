@@ -1,0 +1,141 @@
+name: Java Build and Release
+
+on:
+  push:
+    paths:
+      - 'src/main/java/**'
+      - '.github/workflows/maven-publish.yml'
+  pull_request:
+    paths:
+      - 'src/main/java/**'
+      - '.github/workflows/maven-publish.yml'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            label: linux-amd64
+            artifact_name: biliTickerBuy-Linux-x86_64
+          - os: ubuntu-latest
+            arch: arm64
+            label: linux-arm64
+            artifact_name: biliTickerBuy-Linux-aarch64
+          - os: windows-latest
+            arch: amd64
+            label: windows-amd64
+            static: true
+            artifact_name: biliTickerBuy-Windows-x86_64
+          - os: macos-latest
+            arch: amd64
+            label: macos-amd64
+            artifact_name: biliTickerBuy-macOS-x86_64
+          - os: macos-14
+            arch: arm64
+            artifact_name: biliTickerBuy-macOS-aarch64
+
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Generate build info
+      id: build_info
+      shell: bash
+      run: |
+        echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+    - name: Setup GraalVM
+      uses: graalvm/setup-graalvm@v1
+      with:
+        java-version: '21'
+        distribution: 'graalvm'
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        native-image-job-reports: 'true'
+        architecture: ${{ matrix.arch }}
+
+    - name: Build with Maven
+      run: mvn -B clean package --file pom.xml
+
+    - name: Upload JAR Artifacts
+      if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
+      uses: actions/upload-artifact@v4
+      with:
+        name: biliTickerBuy-${{ steps.build_info.outputs.date }}-${{ steps.build_info.outputs.build_id }}-jar
+        path: target/*-jar-with-dependencies.jar
+        retention-days: 5
+
+
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+
+    
+    - name: Generate release info
+      id: release_info
+      run: |
+        echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+        echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    - name: Install compression tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y p7zip-full xz-utils tar
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare and compress release assets
+      run: |
+        mkdir -p release
+        mkdir -p temp
+        
+        echo "Contents of artifacts directory:"
+        ls -R artifacts/
+        
+        # Process each artifact directory
+        for dir in artifacts/*; do
+          if [ -d "$dir" ]; then
+            artifact_name=$(basename "$dir")
+            echo "Processing artifact: $artifact_name"
+            
+            # Check for file types and process accordingly
+            if [ -f "$dir"/*.exe ]; then
+              echo "Processing Windows executable"
+              7z a "release/${artifact_name}.7z" "$dir"/*
+            elif [ -f "$dir"/*.jar ]; then
+              echo "Processing JAR file"
+              cp "$dir"/*.jar release/
+            else
+              echo "Processing binary file"
+              tar -czf "release/${artifact_name}.tar.xz" -C "$dir" .
+            fi
+          fi
+        done
+        
+        echo "Final release contents:"
+        ls -la release/
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/*
+        tag_name: v${{ steps.release_info.outputs.version }}-${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }}
+        name: Release ${{ steps.release_info.outputs.version }} (${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }})
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
