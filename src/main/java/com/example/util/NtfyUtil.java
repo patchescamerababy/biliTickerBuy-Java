@@ -18,7 +18,7 @@ public class NtfyUtil {
     private static final OkHttpClient client = new OkHttpClient();
 
     public static void sendRepeatMessage(String ntfyUrl, String message, String title, String username, String password, int intervalSeconds, int durationMinutes) {
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(Runtime.getRuntime().availableProcessors());
 
         final long endTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(durationMinutes);
         
