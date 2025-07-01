@@ -104,7 +104,7 @@ jobs:
           # 进入目录开始构建
           Push-Location target\native-image
           native-image.cmd `
-            -jar $($jar.Name) `
+            -jar biliTickerBuy-1.0-SNAPSHOT.jar `
             --initialize-at-run-time `
             -H:+UnlockExperimentalVMOptions `
             -H:-CheckToolchain `
@@ -142,7 +142,7 @@ jobs:
             -H:+AddAllCharsets \
             -H:+IncludeAllLocales \
             --gc=G1 \
-            -jar biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar \
+            -jar biliTickerBuy-1.0-SNAPSHOT.jar \
             -H:Name=biliTickerBuy-${{ matrix.label }} \
             ${{ matrix.static && '--static' || '' }}
           popd
@@ -165,7 +165,7 @@ jobs:
             -H:ResourceConfigurationFiles=config/resource-config.json -H:ReflectionConfigurationFiles=config/reflect-config.json -H:JNIConfigurationFiles=config/jni-config.json -H:DynamicProxyConfigurationFiles=config/proxy-config.json -H:SerializationConfigurationFiles=config/serialization-config.json \
             -H:+AddAllCharsets \
             -H:+IncludeAllLocales \
-            -jar biliTickerBuy-1.0-SNAPSHOT-jar-with-dependencies.jar \
+            -jar biliTickerBuy-1.0-SNAPSHOT.jar \
             -H:Name=biliTickerBuy-${{ matrix.label }} \
             ${{ matrix.static && '--static' || '' }}
           popd
