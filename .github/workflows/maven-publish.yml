@@ -63,8 +63,6 @@ jobs:
       - name: Build with Maven
         run: mvn -B clean package --file pom.xml
 
-      # ─────────────────────────────────────────────────────────────────────
-      # Upload the JAR for *every* matrix entry:
       - name: Upload JAR Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -89,52 +87,16 @@ jobs:
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Install compression tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y p7zip-full xz-utils tar
-
-      - name: Download all build artifacts
+      - name: Download all JAR artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Prepare and compress release assets
-        run: |
-          mkdir -p release
-          echo "Contents of artifacts directory:"
-          ls -R artifacts/
-
-          for dir in artifacts/*; do
-            if [ -d "$dir" ]; then
-              art=$(basename "$dir")
-              echo "Processing $art"
-
-              # find .exe or .jar
-              exe=("$dir"/*.exe)
-              jar=("$dir"/*.jar)
-
-              if [ -f "${exe[0]}" ]; then
-                echo " Windows executable → ${art}.7z"
-                7z a "release/${art}.7z" "$dir"/*
-              elif [ -f "${jar[0]}" ]; then
-                echo " JAR → ${art}.jar"
-                cp "${jar[0]}" "release/${art}.jar"
-              else
-                echo " Other binaries → ${art}.tar.xz"
-                tar -cJf "release/${art}.tar.xz" -C "$dir" .
-              fi
-            fi
-          done
-
-          echo "Final release contents:"
-          ls -la release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.release_info.outputs.version }}-${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }}
           name: Release ${{ steps.release_info.outputs.version }} (${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }})
-          files: release/*
+          files: artifacts/**/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
