@@ -98,7 +98,7 @@ jobs:
       
           # 创建 native-image 目录并准备文件
           New-Item -ItemType Directory -Force -Path target\native-image
-          Copy-Item -Path src\config -Destination target\native-image\ -Recurse -Force
+          Copy-Item -Path config -Destination target\native-image\ -Recurse -Force
           Copy-Item -Path $jar.FullName -Destination target\native-image\
       
           # 进入目录开始构建
@@ -128,7 +128,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          cp -r src/config target/native-image/
+          cp -r config target/native-image/
           pushd target/native-image
           native-image \
             --initialize-at-run-time \
@@ -152,7 +152,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          cp -r src/config target/native-image/
+          cp -r config target/native-image/
           pushd target/native-image
           native-image \
             --initialize-at-run-time \
@@ -176,10 +176,12 @@ jobs:
         with:
           name: jar-files
           path: |
-            target/*-with-dependencies.jar
-            target/*-sources.jar
-            target/*-javadoc.jar
+            target/*-jar-with-dependencies.jar
+            target/*-all.jar
+            target/*.jar
+            "!target/original-*.jar"      # <- 必须加引号才能正确排除
           retention-days: 5
+          
       - name: Upload Native Binaries
         uses: actions/upload-artifact@v4
         with:
