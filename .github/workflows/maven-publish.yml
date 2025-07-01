@@ -6,10 +6,12 @@ on:
     paths:
       - 'src/main/java/**'
       - '.github/workflows/maven-publish.yml'
+      - 'pom.xml'
   pull_request:
     paths:
       - 'src/main/java/**'
       - '.github/workflows/maven-publish.yml'
+      - 'pom.xml'
 
 permissions:
   contents: write
