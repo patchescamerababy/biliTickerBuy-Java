@@ -92,11 +92,19 @@ jobs:
         with:
           path: artifacts
 
+      - name: Compress JARs with 7zip
+        run: |
+          mkdir -p release
+          find artifacts -type f -name '*.jar' -print0 | while IFS= read -r -d '' filepath; do
+            filename=$(basename "$filepath" .jar)
+            7z a "release/${filename}.7z" "$filepath"
+          done
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.release_info.outputs.version }}-${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }}
           name: Release ${{ steps.release_info.outputs.version }} (${{ steps.release_info.outputs.date }}-${{ steps.release_info.outputs.build_id }})
-          files: artifacts/**/*.jar
+          files: release/*.7z
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
