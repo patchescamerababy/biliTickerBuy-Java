@@ -130,7 +130,6 @@ jobs:
           --no-fallback \
           -H:+JNI -H:ConfigurationFileDirectories=./config \
           --initialize-at-run-time \
-          --gc=G1 \
           -jar app.jar \
           -H:Name=biliTickerBuy-${{ matrix.label }}
         popd
