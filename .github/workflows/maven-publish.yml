@@ -2,7 +2,7 @@ name: Java Build and Release
 
 on:
   push:
-    branches: [ main ]     
+    branches: [ main ]
     paths:
       - 'src/main/java/**'
       - '.github/workflows/maven-publish.yml'
@@ -17,66 +17,42 @@ permissions:
 
 jobs:
   build:
-    name: Build (${{ matrix.label }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-            label: linux-amd64
-            artifact_name: biliTickerBuy-Linux-x86_64
-          - os: ubuntu-latest
-            arch: arm64
-            label: linux-arm64
-            artifact_name: biliTickerBuy-Linux-aarch64
-          - os: windows-latest
-            arch: amd64
-            label: windows-amd64
-            artifact_name: biliTickerBuy-Windows-x86_64
-          - os: macos-latest
-            arch: amd64
-            label: macos-amd64
-            artifact_name: biliTickerBuy-macOS-x86_64
-          - os: macos-14
-            arch: arm64
-            label: macos-arm64
-            artifact_name: biliTickerBuy-macOS-aarch64
+    name: Build fat-jar
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.build_info.outputs.date }}
+      artifact: ${{ steps.name_step.outputs.artifact_name }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate build info (date + commit)
+      - name: Generate date
         id: build_info
-        run: |
-          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-          echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        shell: bash
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-      - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@v1
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '21'
-          distribution: 'graalvm'
-          architecture: ${{ matrix.arch }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build with Maven
         run: mvn -B clean package --file pom.xml
 
-      - name: Show target directory (debug)
-        run: ls -R target
+      - name: Set artifact name output
+        id: name_step
+        run: echo "artifact_name=biliTickerBuy-${{ steps.build_info.outputs.date }}" >> $GITHUB_OUTPUT
 
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}-${{ steps.build_info.outputs.build_id }}
-          # 兼容常见 Shade/Assembly 命名：*-jar-with-dependencies.jar、*-all.jar，或者默认 *.jar
+          name: biliTickerBuy-${{ steps.build_info.outputs.date }}
           path: |
             target/*-jar-with-dependencies.jar
             target/*-all.jar
             target/*.jar
           retention-days: 5
-
 
   release:
     name: Publish Release
@@ -87,35 +63,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate release info
-        id: rel_info
-        shell: bash
-        run: |
-          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-          echo "build_id=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
-          name: biliTickerBuy-${{ steps.rel_info.outputs.date }}-${{ steps.rel_info.outputs.build_id }}
-          path: jars
-
-      - name: Prepare release assets
-        run: |
-          mkdir -p release
-          # 将所有 jar 重命名为带日期前缀，方便区分
-          for jar in jars/**/*.jar; do
-            base=$(basename "$jar")
-            mv "$jar" "release/v-${{ steps.rel_info.outputs.date }}-$base"
-          done
-          echo "Release files:"
-          ls -l release
+          name: ${{ needs.build.outputs.artifact }}
+          path: release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v-${{ steps.rel_info.outputs.date }}
-          name: Release ${{ steps.rel_info.outputs.date }}
-          files: release/*
+          tag_name: v-${{ needs.build.outputs.date }}
+          name: Release ${{ needs.build.outputs.date }}
+          files: release/**/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
