@@ -102,15 +102,14 @@ jobs:
         echo ">>> Copied native libs:"
         find src/main/resources/native -type f
 
-    # GraalVM & Maven
-    - name: Setup GraalVM
-      uses: graalvm/setup-graalvm@v1
+
+    - name: Setup JDK 8 (Temurin)
+      uses: actions/setup-java@v4
       with:
-        java-version: '21'
-        distribution: 'graalvm'
-        cache: 'maven'
-        native-image-job-reports: 'true'
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        distribution: temurin        
+        java-version: '8'            
+        cache: 'maven'               
+
 
     - name: Build with Maven
       run: mvn -B clean package -Dmaven.test.skip=true
@@ -138,7 +137,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ① 生成日期字符串（UTC，可按需改时区）
+      # ① 生成日期字符串
       - name: Gen date
         id: date
         run: echo "value=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
@@ -149,7 +148,7 @@ jobs:
         with:
           path: release
 
-      # （可选）移除 original-*.jar，只保留要发布的
+      # 移除 original-*.jar，只保留要发布的
       - name: Filter JARs
         run: |
           find release -type f -name 'original-*.jar' -delete
