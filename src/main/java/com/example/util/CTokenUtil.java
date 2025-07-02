@@ -122,7 +122,7 @@ public class CTokenUtil {
 
         if ("createV2".equals(type)) {
             // createV2阶段
-            this.timeDifference = (int) (System.currentTimeMillis() / 1000 + timeOffset - ticketCollectionT);
+            this.timeDifference = (int) ((double) System.currentTimeMillis() / 1000 + timeOffset - ticketCollectionT);
             this.timer = (int) (this.timeDifference + stayTime);
             this.pageUnload = 25;  // 页面卸载数: 手机端抓包数据
         } else {
