@@ -106,7 +106,7 @@ jobs:
       uses: actions/setup-java@v4
       with:
         distribution: liberica
-        java-version: '8'
+        java-version: '21'
         # liberica/full 自动带 JavaFX
         cache: maven
 
