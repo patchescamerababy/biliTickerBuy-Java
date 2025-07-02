@@ -136,22 +136,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Download JAR
-      uses: actions/download-artifact@v4
+      # 下载 java-build 上传的 JAR 产物
+      - name: Download JAR
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-    - name: Compress JAR
-      run: |
-        mkdir release
-        jar=$(find biliTickerBuy-* -type f -name '*.jar' ! -name 'original-*.jar' | head -n1)
-        7z a "release/biliTickerBuy-${{ github.sha }}.7z" "$jar"
+      # 可选：整理到 release/ 并排除 original-*.jar
+      - name: Collect JARs
+        run: |
+          mkdir -p release
+          find artifacts -type f -name '*.jar' ! -name 'original-*.jar' -exec cp {} release/ \;
+          echo ">>> Ready assets:"
+          ls -l release
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v$(date +'%Y%m%d')
-        name: Release $(date +'%Y%m%d')
-        files: release/*.7z
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 创建 GitHub Release 并直接上传 JAR
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v$(date +'%Y%m%d')
+          name: Release $(date +'%Y%m%d')
+          files: release/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
