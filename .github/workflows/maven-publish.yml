@@ -80,7 +80,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 下载所有 native-XXX
     - name: Download native libs
       uses: actions/download-artifact@v4
 
@@ -103,13 +102,13 @@ jobs:
         find src/main/resources/native -type f
 
 
-    - name: Setup JDK 8 (Temurin)
+    - name: Setup JDK 8 (Liberica Full)
       uses: actions/setup-java@v4
       with:
-        distribution: temurin        
-        java-version: '8'            
-        cache: 'maven'               
-
+        distribution: liberica
+        java-version: '8'
+        # liberica/full 自动带 JavaFX
+        cache: maven
 
     - name: Build with Maven
       run: mvn -B clean package -Dmaven.test.skip=true
