@@ -30,10 +30,6 @@ jobs:
             arch: x64
             label: linux-amd64
             artifact_name: biliTickerBuy-Linux-x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-            label: linux-arm64
-            artifact_name: biliTickerBuy-Linux-aarch64
           # ---------- Windows ----------
           - os: windows-latest
             arch: x64
@@ -50,39 +46,102 @@ jobs:
             artifact_name: biliTickerBuy-macOS-aarch64
 
     steps:
-      - uses: actions/checkout@v4
+    # 0️⃣  拉取当前 Java 项目
+    - uses: actions/checkout@v4
 
-      - name: Generate build info
-        id: build_info
-        run: |
-          echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
-          echo "build_id=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+    # 1️⃣  生成构建信息
+    - name: Generate build info
+      id: build_info
+      run: |
+        echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+        echo "build_id=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '21'
-          distribution: 'graalvm'
-          architecture: ${{ matrix.arch }}   # x64 / aarch64
-          cache: 'maven'
-          native-image-job-reports: 'true'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+    # 2️⃣  安装 Rust（用于编译 native 库）
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
 
-      - name: Build with Maven
-        run: mvn -B clean package --file pom.xml
+    # 3️⃣  克隆 & 编译 Rust 本地库，复制到 resources/native/…
+    - name: Build native library (Rust)
+      shell: bash
+      run: |
+        set -e
+        # ---- 3.1 克隆 ----
+        git clone --depth 1 https://github.com/patchescamerababy/biliTicker_gt_java.git
+        cd biliTicker_gt_java
 
-      - name: Upload JAR Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}
-          path: |
-            target/*-jar-with-dependencies.jar
-            target/*-all.jar
-            target/*.jar
-            "!target/original-*.jar"      # <- 必须加引号才能正确排除
-          retention-days: 5
-          if-no-files-found: error        # 若排除过多立即失败，便于排错
+        # ---- 3.2 选择交叉编译三元组 ----
+        case "${{ matrix.label }}" in
+          linux-amd64)   TARGET=x86_64-unknown-linux-gnu ;;
+          windows-amd64) TARGET=x86_64-pc-windows-msvc ;;
+          macos-amd64)   TARGET=x86_64-apple-darwin ;;
+          macos-arm64)   TARGET=aarch64-apple-darwin ;;
+        esac
+        echo ">> Rust target: $TARGET"
 
+        rustup target add "$TARGET"
+        cargo build --release --target "$TARGET"
+
+        # ---- 3.3 拷贝到 Java 项目 resources/native/… ----
+        ROOT="$GITHUB_WORKSPACE"   # Java 项目根目录
+        LIBDIR="target/$TARGET/release"
+
+        case "$TARGET" in
+          x86_64-pc-windows-msvc)
+            mkdir -p "$ROOT/src/main/resources/native/win/x86_64"
+            cp "$LIBDIR"/bili_ticket_gt_java.dll \
+               "$ROOT/src/main/resources/native/win/x86_64/"
+            ;;
+          x86_64-unknown-linux-gnu)
+            mkdir -p "$ROOT/src/main/resources/native/linux/x86_64"
+            cp "$LIBDIR"/libbili_ticket_gt_java.so \
+               "$ROOT/src/main/resources/native/linux/x86_64/"
+            ;;
+          x86_64-apple-darwin)
+            mkdir -p "$ROOT/src/main/resources/native/macos/x86_64"
+            cp "$LIBDIR"/libbili_ticket_gt_java.dylib \
+               "$ROOT/src/main/resources/native/macos/x86_64/"
+            ;;
+          aarch64-apple-darwin)
+            mkdir -p "$ROOT/src/main/resources/native/macos/aarch64"
+            cp "$LIBDIR"/libbili_ticket_gt_java.dylib \
+               "$ROOT/src/main/resources/native/macos/aarch64/"
+            ;;
+        esac
+        echo ">> Copied native lib to resources/native (if applicable)"
+        cd "$ROOT"
+
+    # 4️⃣  安装 GraalVM & 缓存 Maven
+    - name: Setup GraalVM
+      uses: graalvm/setup-graalvm@v1
+      with:
+        java-version: '21'
+        distribution: 'graalvm'
+        architecture: ${{ matrix.arch }}
+        cache: 'maven'
+        native-image-job-reports: 'true'
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+    # 5️⃣  Maven 打包
+    - name: Build with Maven
+      run: mvn -B clean package --file pom.xml
+
+    # 6️⃣  上传每个平台的 JAR（原逻辑不变）
+    - name: Upload JAR Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}
+        path: |
+          target/*-jar-with-dependencies.jar
+          target/*-all.jar
+          target/*.jar
+          "!target/original-*.jar"
+        retention-days: 5
+        if-no-files-found: error
+
+  # ———————————————— Release job 保持原样 ———————————————— #
   release:
     name: Publish Release
     needs: build
@@ -90,37 +149,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Generate release info
-        id: release_info
-        run: echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+    - name: Generate release info
+      id: release_info
+      run: echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
 
-      - name: Install 7-Zip
-        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+    - name: Install 7-Zip
+      run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      - name: Compress each platform JAR
-        run: |
-          mkdir -p release
-          for dir in biliTickerBuy-*; do
-            # 只取第一个非 original-*.jar
-            jar=$(find "$dir" -type f -name '*.jar' ! -name 'original-*.jar' | head -n 1)
-            [ -f "$jar" ] || { echo "No valid JAR found in $dir"; continue; }
-            base=$(basename "$dir")
-            echo "Compressing $jar -> release/${base}.7z"
-            7z a "release/${base}.7z" "$jar"
-          done
-          echo "Release assets:"
-          ls -l release
+    - name: Compress each platform JAR
+      run: |
+        mkdir -p release
+        for dir in biliTickerBuy-*; do
+          jar=$(find "$dir" -type f -name '*.jar' ! -name 'original-*.jar' | head -n 1)
+          [ -f "$jar" ] || { echo "No valid JAR found in $dir"; continue; }
+          base=$(basename "$dir")
+          7z a "release/${base}.7z" "$jar"
+        done
+        ls -l release
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.release_info.outputs.date }}
-          name: Release ${{ steps.release_info.outputs.date }}
-          files: release/*.7z
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.release_info.outputs.date }}
+        name: Release ${{ steps.release_info.outputs.date }}
+        files: release/*.7z
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
