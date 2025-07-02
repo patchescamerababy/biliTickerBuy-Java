@@ -28,7 +28,6 @@ public class BarkUtil extends Notifier {
         
         // 构建请求数据
         JSONObject data = new JSONObject();
-        data.put("icon", "https://raw.githubusercontent.com/mikumifa/biliTickerBuy/refs/heads/main/assets/icon.ico");
         data.put("group", "biliTickerBuy");
         data.put("url", "https://mall.bilibili.com/neul/index.html?page=box_me&noTitleBar=1");
         data.put("sound", "telegraph");
