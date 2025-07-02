@@ -138,27 +138,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 下载 java-build 上传的 JAR 产物
+      # ① 生成日期字符串（UTC，可按需改时区）
+      - name: Gen date
+        id: date
+        run: echo "value=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+
+      # ② 下载 JAR 产物
       - name: Download JAR
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: release
 
-      # 可选：整理到 release/ 并排除 original-*.jar
-      - name: Collect JARs
+      # （可选）移除 original-*.jar，只保留要发布的
+      - name: Filter JARs
         run: |
-          mkdir -p release
-          find artifacts -type f -name '*.jar' ! -name 'original-*.jar' -exec cp {} release/ \;
-          echo ">>> Ready assets:"
-          ls -l release
+          find release -type f -name 'original-*.jar' -delete
+          echo "Assets:"
+          find release -type f -name '*.jar'
 
-      # 创建 GitHub Release 并直接上传 JAR
+      # ③ 创建 Release，直接上传 JAR
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v$(date +'%Y%m%d')
-          name: Release $(date +'%Y%m%d')
-          files: release/*.jar
+          tag_name: v${{ steps.date.outputs.value }}
+          name: Release ${{ steps.date.outputs.value }}
+          files: release/**/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
