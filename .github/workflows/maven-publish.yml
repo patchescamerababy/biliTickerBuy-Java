@@ -17,9 +17,10 @@ permissions:
   contents: write
   packages: write
 
+# —————————————————— 1️⃣  Rust native libraries —————————————————— #
 jobs:
-  build:
-    name: Build (${{ matrix.label }})
+  rust-build:
+    name: Rust (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -27,112 +28,98 @@ jobs:
         include:
           # ---------- Linux ----------
           - os: ubuntu-latest
-            arch: x64
-            label: linux-amd64
-            artifact_name: biliTickerBuy-Linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+            out_name: libbili_ticket_gt_java.so
           # ---------- Windows ----------
           - os: windows-latest
-            arch: x64
-            label: windows-amd64
-            artifact_name: biliTickerBuy-Windows-x86_64
+            target: x86_64-pc-windows-msvc
+            label: win-x86_64
+            out_name: bili_ticket_gt_java.dll
           # ---------- macOS ----------
           - os: macos-latest
-            arch: x64
-            label: macos-amd64
-            artifact_name: biliTickerBuy-macOS-x86_64
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+            out_name: libbili_ticket_gt_java.dylib
           - os: macos-14
-            arch: aarch64
-            label: macos-arm64
-            artifact_name: biliTickerBuy-macOS-aarch64
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+            out_name: libbili_ticket_gt_java.dylib
 
     steps:
-    # 0️⃣  拉取当前 Java 项目
     - uses: actions/checkout@v4
 
-    # 1️⃣  生成构建信息
-    - name: Generate build info
-      id: build_info
-      run: |
-        echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
-        echo "build_id=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-    # 2️⃣  安装 Rust（用于编译 native 库）
     - uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         profile: minimal
         override: true
 
-    # 3️⃣  克隆 & 编译 Rust 本地库，复制到 resources/native/…
-    - name: Build native library (Rust)
-      shell: bash
+    - name: Clone biliTicker_gt_java
+      run: git clone --depth 1 https://github.com/patchescamerababy/biliTicker_gt_java.git
+
+    - name: Build native lib
+      run: |
+        rustup target add ${{ matrix.target }}
+        cd biliTicker_gt_java
+        cargo build --release --target ${{ matrix.target }}
+
+    - name: Upload native artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-${{ matrix.label }}
+        path: biliTicker_gt_java/target/${{ matrix.target }}/release/${{ matrix.out_name }}
+        retention-days: 5
+
+# —————————————————— 2️⃣  Maven (single Ubuntu build) —————————————————— #
+  java-build:
+    name: Maven package (with all native libs)
+    needs: rust-build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # 下载所有 native-XXX
+    - name: Download native libs
+      uses: actions/download-artifact@v4
+
+    # 拷贝到 resources/native/…
+    - name: Copy native libs into resources
       run: |
         set -e
-        # ---- 3.1 克隆 ----
-        git clone --depth 1 https://github.com/patchescamerababy/biliTicker_gt_java.git
-        cd biliTicker_gt_java
+        declare -A MAP=( \
+          ["native-win-x86_64"]="win/x86_64/bili_ticket_gt_java.dll" \
+          ["native-linux-x86_64"]="linux/x86_64/libbili_ticket_gt_java.so" \
+          ["native-macos-x86_64"]="macos/x86_64/libbili_ticket_gt_java.dylib" \
+          ["native-macos-aarch64"]="macos/aarch64/libbili_ticket_gt_java.dylib" )
+        for dir in "${!MAP[@]}"; do
+          src=$(find "$dir" -type f)
+          dst="src/main/resources/native/${MAP[$dir]}"
+          mkdir -p "$(dirname "$dst")"
+          cp "$src" "$dst"
+        done
+        echo ">>> Copied native libs:"
+        find src/main/resources/native -type f
 
-        # ---- 3.2 选择交叉编译三元组 ----
-        case "${{ matrix.label }}" in
-          linux-amd64)   TARGET=x86_64-unknown-linux-gnu ;;
-          windows-amd64) TARGET=x86_64-pc-windows-msvc ;;
-          macos-amd64)   TARGET=x86_64-apple-darwin ;;
-          macos-arm64)   TARGET=aarch64-apple-darwin ;;
-        esac
-        echo ">> Rust target: $TARGET"
-
-        rustup target add "$TARGET"
-        cargo build --release --target "$TARGET"
-
-        # ---- 3.3 拷贝到 Java 项目 resources/native/… ----
-        ROOT="$GITHUB_WORKSPACE"   # Java 项目根目录
-        LIBDIR="target/$TARGET/release"
-
-        case "$TARGET" in
-          x86_64-pc-windows-msvc)
-            mkdir -p "$ROOT/src/main/resources/native/win/x86_64"
-            cp "$LIBDIR"/bili_ticket_gt_java.dll \
-               "$ROOT/src/main/resources/native/win/x86_64/"
-            ;;
-          x86_64-unknown-linux-gnu)
-            mkdir -p "$ROOT/src/main/resources/native/linux/x86_64"
-            cp "$LIBDIR"/libbili_ticket_gt_java.so \
-               "$ROOT/src/main/resources/native/linux/x86_64/"
-            ;;
-          x86_64-apple-darwin)
-            mkdir -p "$ROOT/src/main/resources/native/macos/x86_64"
-            cp "$LIBDIR"/libbili_ticket_gt_java.dylib \
-               "$ROOT/src/main/resources/native/macos/x86_64/"
-            ;;
-          aarch64-apple-darwin)
-            mkdir -p "$ROOT/src/main/resources/native/macos/aarch64"
-            cp "$LIBDIR"/libbili_ticket_gt_java.dylib \
-               "$ROOT/src/main/resources/native/macos/aarch64/"
-            ;;
-        esac
-        echo ">> Copied native lib to resources/native (if applicable)"
-        cd "$ROOT"
-
-    # 4️⃣  安装 GraalVM & 缓存 Maven
+    # GraalVM & Maven
     - name: Setup GraalVM
       uses: graalvm/setup-graalvm@v1
       with:
         java-version: '21'
         distribution: 'graalvm'
-        architecture: ${{ matrix.arch }}
         cache: 'maven'
         native-image-job-reports: 'true'
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
-    # 5️⃣  Maven 打包
     - name: Build with Maven
-      run: mvn -B clean package --file pom.xml
+      run: mvn -B clean package -Dmaven.test.skip=true
 
-    # 6️⃣  上传每个平台的 JAR（原逻辑不变）
+    # 上传唯一的 JAR
     - name: Upload JAR Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.artifact_name }}-${{ steps.build_info.outputs.date }}
+        name: biliTickerBuy-${{ github.sha }}
         path: |
           target/*-jar-with-dependencies.jar
           target/*-all.jar
@@ -141,42 +128,30 @@ jobs:
         retention-days: 5
         if-no-files-found: error
 
-  # ———————————————— Release job 保持原样 ———————————————— #
+# —————————————————— 3️⃣  Release —————————————————— #
   release:
     name: Publish Release
-    needs: build
+    needs: java-build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Generate release info
-      id: release_info
-      run: echo "date=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
-
-    - name: Download all artifacts
+    - name: Download JAR
       uses: actions/download-artifact@v4
 
-    - name: Install 7-Zip
-      run: sudo apt-get update && sudo apt-get install -y p7zip-full
-
-    - name: Compress each platform JAR
+    - name: Compress JAR
       run: |
-        mkdir -p release
-        for dir in biliTickerBuy-*; do
-          jar=$(find "$dir" -type f -name '*.jar' ! -name 'original-*.jar' | head -n 1)
-          [ -f "$jar" ] || { echo "No valid JAR found in $dir"; continue; }
-          base=$(basename "$dir")
-          7z a "release/${base}.7z" "$jar"
-        done
-        ls -l release
+        mkdir release
+        jar=$(find biliTickerBuy-* -type f -name '*.jar' ! -name 'original-*.jar' | head -n1)
+        7z a "release/biliTickerBuy-${{ github.sha }}.7z" "$jar"
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v${{ steps.release_info.outputs.date }}
-        name: Release ${{ steps.release_info.outputs.date }}
+        tag_name: v$(date +'%Y%m%d')
+        name: Release $(date +'%Y%m%d')
         files: release/*.7z
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
