@@ -13,31 +13,10 @@
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <okhttp.version>4.12.0</okhttp.version>
-        <logback.version>1.2.12</logback.version>
         <slf4j.version>1.7.36</slf4j.version>
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-base</artifactId>
-            <version>17.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-controls</artifactId>
-            <version>17.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-graphics</artifactId>
-            <version>17.0.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjfx</groupId>
-            <artifactId>javafx-fxml</artifactId>
-            <version>17.0.2</version>
-        </dependency>
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>okhttp</artifactId>
@@ -49,19 +28,9 @@
             <version>20231013</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-lang3</artifactId>
-            <version>3.8.1</version>
-        </dependency>
-        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>1.7.32</version>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
-            <version>1.5.13</version>
+            <version>1.7.36</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
@@ -89,11 +58,6 @@
             <artifactId>javase</artifactId>
             <version>3.4.1</version>
         </dependency>
-        <dependency>
-            <groupId>com.microsoft.onnxruntime</groupId>
-            <artifactId>onnxruntime</artifactId>
-            <version>1.8.1</version>
-        </dependency>
 
         <dependency>
             <groupId>com.microsoft.playwright</groupId>
@@ -105,7 +69,7 @@
             <artifactId>commons-net</artifactId>
             <version>3.11.0</version>
         </dependency>
-    </dependencies>
+  </dependencies>
 
     <build>
         <resources>
@@ -116,7 +80,7 @@
                 </includes>
             </resource>
         </resources>
-        
+
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -128,16 +92,8 @@
                     <encoding>UTF-8</encoding>
                 </configuration>
             </plugin>
-            
-            <plugin>
-                <groupId>org.openjfx</groupId>
-                <artifactId>javafx-maven-plugin</artifactId>
-                <version>0.0.8</version>
-                <configuration>
-                    <mainClass>com.example.Client</mainClass>
-                </configuration>
-            </plugin>
-            
+
+
             <!-- 确保资源文件被正确包含 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -147,7 +103,7 @@
                     <includeEmptyDirs>true</includeEmptyDirs>
                 </configuration>
             </plugin>
-            
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -160,7 +116,8 @@
                         </goals>
                         <configuration>
                             <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.example.Client</mainClass>
                                 </transformer>
                             </transformers>
@@ -180,5 +137,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>
